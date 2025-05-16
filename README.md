@@ -9,25 +9,22 @@ This Chrome extension enhances your Google Scholar experience by automatically f
 ![Screenshot of Extension in Action](Images/Screenshot.png)
 
 
-## Why This Extension?
+### Why?
 
-In fields like Computer Science (CS) and Electrical Engineering (EE), top-tier conferences are pivotal for disseminating cutting-edge research, often holding prestige comparable to or exceeding that of journals. However, unlike the readily available Impact Factor for journals, quickly discerning a conference's ranking can be challenging.
+Google Scholar is great at collecting publications but **terrible at showing the prestige of conference venues**—a crucial signal in CS and EE. This add‑on pulls the official **CORE 2023** list and surfaces each publication’s tier directly in the interface.
 
-This extension solves this by:
-*   Displaying a **summary panel** on Google Scholar profiles, showing the count of papers per CORE rank (A\*, A, B, C, N/A).
-*   Tagging **individual publications** in the list with their respective CORE rank badge.
-*   Helping you **save time** and **quickly evaluate** the quality of conference venues and research output.
+---
 
-## Key Features
+## Features
 
-*   **Automatic Ranking:** Fetches venue details and matches them against CORE 2023 data.
-*   **Inline Rank Display:** Shows a colored rank badge (A\*, A, B, C) next to each ranked paper title.
-*   **Profile Summary Panel:** Injects a summary block on the right sidebar of Google Scholar profiles, showing paper counts for each rank.
-    *   Includes a "BETA" label with a helpful tooltip for users.
-    *   Provides a "Report Bug" link for easy feedback.
+|                           |                                               |
+| ------------------------- | --------------------------------------------- |
+| 🎯 **Automatic matching** | Apply multiple heuristics for matching     |
+| 🏷 **Rank badges**        | A\*, A, B, C colour‑coded inline              |
+| 📊 **Summary panel**      | Totals for A\*, A, B, C papers on the profile |
 
 
-## Installation (Developer Mode for Chrome)
+## Quick Installation (Developer Mode for Chrome)
 
 1.  **Download or Clone:**
     *   **Option A (Download ZIP):** Download the latest [release](https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker/releases/download/v0.1.5/Google-Scholar-Conference-Ranker-v0.1.5.zip). or click on the green "Code" button, then "Download ZIP". Extract the ZIP file to a folder on your computer.
@@ -76,3 +73,6 @@ This extension is currently in BETA. Your feedback is invaluable!
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details (You'll need to create a LICENSE file with the MIT license text).
+
+
+⭐ **Like it?** Give the repo a star—helps other researchers discover the extension!
