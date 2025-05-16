@@ -61,7 +61,7 @@ async function expandAllPublications(statusElement: HTMLElement): Promise<void> 
       });
       observer.observe(tableBody, { childList: true, subtree: false });
       showMoreButton.click();
-      setTimeout(() => { // Fallback timeout
+      setTimeout(() => { 
         observer.disconnect();
         resolve();
       }, 5000);
@@ -173,51 +173,41 @@ function cleanTextForComparison(text: string): string {
     if (!text) return "";
     let cleanedText = text.toLowerCase();
 
-    // Normalize "&" to "and"
-    // Use regex with word boundaries (\b) if you only want to replace standalone '&'
-    // For simplicity here, a global replace works well for venue names.
-    cleanedText = cleanedText.replace(/ & /g, " and "); // Replace " & " with " and "
-    cleanedText = cleanedText.replace(/&/g, " and ");   // Replace standalone & if not surrounded by spaces, ensure spaces are added
+    cleanedText = cleanedText.replace(/ & /g, " and "); 
+    cleanedText = cleanedText.replace(/&/g, " and ");   // some authors have used '&' instead 'and' in conference title
 
-    // Basic punctuation that might differ but try to keep structure for substring
-    cleanedText = cleanedText.replace(/[.,\/#!$%\^;\*:{}<>=\-_`~?"“()]/g, " "); // Added parentheses to the removal list here for general cleaning
-    cleanedText = cleanedText.replace(/\s+/g, ' '); // Normalize multiple spaces to a single space
+    
+    cleanedText = cleanedText.replace(/[.,\/#!$%\^;\*:{}<>=\-_`~?"“()]/g, " "); 
+    cleanedText = cleanedText.replace(/\s+/g, ' '); 
     return cleanedText.trim();
 }
 
 function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
     const normalizedScholarVenueName = venueName.toLowerCase().trim();
-    // --- Initial Log for the venue being processed ---
-    console.log(`--- Evaluating GS Venue: "${venueName}" (Normalized: "${normalizedScholarVenueName}") ---`);
+    
 
     if (!normalizedScholarVenueName) return "N/A";
 
-    // --- START: Specific non-conference exclusion ---
+    
     const specificExclusions: string[] = [
         "sigcomm computer communication review",
     ];
     for (const exclusion of specificExclusions) {
         if (normalizedScholarVenueName.includes(exclusion)) {
-            console.log(`SPECIFIC EXCLUSION: GS Venue "${venueName}" contains "${exclusion}". Assigning N/A.`);
             return "N/A";
         }
     }
-    // --- END: Specific non-conference exclusion ---
-
-    // --- 1. Acronym-based match ---
+    
     const extractedScholarAcronyms = extractPotentialAcronymsFromText(venueName);
     if (extractedScholarAcronyms.length > 0) {
-        // Log extracted acronyms from GS venue
-        console.log(`ACRONYM_MATCH_ATTEMPT: Extracted GS Acronyms: [${extractedScholarAcronyms.join(', ')}] for GS Venue: "${venueName}"`);
+        
+        
         for (const scholarAcro of extractedScholarAcronyms) {
             for (const entry of coreData) {
                 if (entry.acronym) {
                     const coreAcro = entry.acronym.toLowerCase().trim();
                     if (coreAcro && coreAcro === scholarAcro) {
-                        console.log(`!!! ACRONYM MATCH FOUND !!!`);
-                        console.log(`  GS Acro: "${scholarAcro}" (from GS Venue: "${venueName}")`);
-                        console.log(`  Matched CORE Acro: "${coreAcro}" (from CORE Title: "${entry.title}")`);
-                        console.log(`  Assigned Rank: ${entry.rank}`);
+                        
                         return VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
                     }
                 }
@@ -229,14 +219,14 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
 
 
     // --- 2. Full name substring match ---
-    console.log(`FULL_NAME_MATCH_ATTEMPT: Starting for GS Venue: "${venueName}"`);
+    
     const gsCleanedForSubstring = cleanTextForComparison(normalizedScholarVenueName);
-    console.log(`  GS Venue Cleaned for Substring Match: "${gsCleanedForSubstring}"`);
+    
 
     let bestMatchRank: string | null = null;
     let longestMatchLength = 0;
-    let bestMatchingCoreTitleOriginal = ""; // To store the original CORE title of the best match
-    let bestMatchingCoreTitleProcessed = ""; // To store the processed CORE title of the best match
+    let bestMatchingCoreTitleOriginal = ""; 
+    let bestMatchingCoreTitleProcessed = ""; 
 
 
     const orgPrefixesToIgnore = [
@@ -262,22 +252,18 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
             } while (strippedSomething && coreTitleForMatch.length > 0);
             coreTitleForMatch = coreTitleForMatch.trim();
 
-            // Debugging for the LCTES case, and can be adapted for others
-            if (entry.acronym === "LCTES" || entry.title.toLowerCase().includes("data centric engineering")) { // Broaden debug for DCE
-                 console.log(`  DEBUG_CORE_ENTRY: Acronym: "${entry.acronym}", Title: "${entry.title}"`);
-                 console.log(`    CDT_orig_cleaned: "${originalCoreTitleCleaned}"`);
-                 console.log(`    CDT_org_stripped (coreTitleForMatch): "${coreTitleForMatch}"`);
-            }
+            
+           
 
             if (gsCleanedForSubstring && coreTitleForMatch && coreTitleForMatch.length > 5) {
                 if (gsCleanedForSubstring.includes(coreTitleForMatch)) {
-                    // console.log(`    POTENTIAL Full name substring match: CORE (org-stripped) "${coreTitleForMatch}" in GS "${gsCleanedForSubstring}" (Rank: ${entry.rank})`);
+                    
                     if (coreTitleForMatch.length > longestMatchLength) {
                         longestMatchLength = coreTitleForMatch.length;
                         bestMatchRank = VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
                         bestMatchingCoreTitleOriginal = entry.title;
                         bestMatchingCoreTitleProcessed = coreTitleForMatch;
-                        // console.log(`      NEW BEST Substring Match: Length ${longestMatchLength}, Rank ${bestMatchRank}, CORE Title: "${entry.title}"`);
+                        
                     }
                 }
             }
@@ -285,11 +271,6 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
     }
 
     if (bestMatchRank !== null) {
-        console.log(`!!! BEST FULL NAME SUBSTRING MATCH CHOSEN for GS Venue: "${venueName}" !!!`);
-        console.log(`  Matched with CORE Title: "${bestMatchingCoreTitleOriginal}"`);
-        console.log(`  (Processed CORE Title for match: "${bestMatchingCoreTitleProcessed}")`);
-        console.log(`  (GS Venue processed for match: "${gsCleanedForSubstring}")`);
-        console.log(`  Longest matched part length: ${longestMatchLength}, Assigned Rank: ${bestMatchRank}`);
         return bestMatchRank;
     }
 
@@ -438,11 +419,11 @@ function updateStatusElement(statusContainer: HTMLElement, processed: number, to
 }
 
 
-// --- MODIFIED displaySummaryPanel ---
+/
 function displaySummaryPanel(rankCounts: Record<string, number>) {
     const existingStatusElement = document.getElementById(STATUS_ELEMENT_ID);
     const parentOfStatus = existingStatusElement?.parentNode;
-    document.getElementById(SUMMARY_PANEL_ID)?.remove(); // Remove old summary if any
+    document.getElementById(SUMMARY_PANEL_ID)?.remove(); 
 
     const panel = document.createElement('div');
     panel.id = SUMMARY_PANEL_ID;
@@ -450,7 +431,7 @@ function displaySummaryPanel(rankCounts: Record<string, number>) {
     panel.style.padding = '10px';
     panel.style.marginBottom = '15px';
 
-    // --- Header with Beta Label (with tooltip) and Report Bug Link ---
+    
     const headerDiv = document.createElement('div');
     headerDiv.style.display = 'flex';
     headerDiv.style.alignItems = 'center';
@@ -465,7 +446,7 @@ function displaySummaryPanel(rankCounts: Record<string, number>) {
     summaryTitle.textContent = 'CORE Rank Summary';
     headerDiv.appendChild(summaryTitle);
 
-    // Beta Label with Tooltip
+    
     const betaLabel = document.createElement('span');
     betaLabel.textContent = 'BETA';
     betaLabel.style.marginLeft = '8px';
@@ -476,8 +457,8 @@ function displaySummaryPanel(rankCounts: Record<string, number>) {
     betaLabel.style.backgroundColor = '#6c757d';
     betaLabel.style.borderRadius = '10px';
     betaLabel.style.verticalAlign = 'middle';
-    betaLabel.style.cursor = 'help'; // Add help cursor to indicate tooltip
-    betaLabel.setAttribute('title', // Moved tooltip here
+    betaLabel.style.cursor = 'help'; 
+    betaLabel.setAttribute('title', 
 		"Developed by Naveed Anwar Bhatti.\n" +
 		"It is free and open source.\n" +
         "We are currently using CORE2023 rankings only.\n" +
@@ -486,17 +467,15 @@ function displaySummaryPanel(rankCounts: Record<string, number>) {
     );
     headerDiv.appendChild(betaLabel);
 
-    // --- Question Mark Icon REMOVED ---
-
-    // Report Bug Link (Text Only, smaller, red)
+    
     const reportBugLink = document.createElement('a');
     reportBugLink.href = "https://forms.office.com/r/PbSzWaQmpJ";
     reportBugLink.target = "_blank";
-    reportBugLink.style.marginLeft = '10px'; // Increased margin a bit as question mark is gone
+    reportBugLink.style.marginLeft = '10px'; 
     reportBugLink.style.textDecoration = 'none';
-    reportBugLink.style.color = '#D32F2F';      // Red color for the link
-    reportBugLink.style.fontSize = '0.75em';    // Reduced font size
-    reportBugLink.style.fontWeight = 'normal'; // Normal weight, or '500' for slightly bolder
+    reportBugLink.style.color = '#D32F2F';      
+    reportBugLink.style.fontSize = '0.75em';    
+    reportBugLink.style.fontWeight = 'normal'; 
     reportBugLink.style.verticalAlign = 'middle';
     reportBugLink.textContent = 'Report Bug';
     reportBugLink.setAttribute('title', 'Report a bug or inconsistency (opens new tab)');
@@ -553,7 +532,7 @@ function displaySummaryPanel(rankCounts: Record<string, number>) {
         }
     }
 }
-// --- END MODIFIED displaySummaryPanel ---
+
 
 async function main() {
   console.log("Google Scholar Ranker: main() started.");
