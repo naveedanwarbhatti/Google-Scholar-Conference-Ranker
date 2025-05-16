@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "es2016", // Modern browsers support ES6
+    "module": "commonjs", // Or "esnext" if you prefer ES modules
+    "outDir": "./dist", // Output directory for compiled JS
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["*.ts"] // Which files to compile
+}
