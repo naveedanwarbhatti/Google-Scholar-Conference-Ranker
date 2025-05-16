@@ -24,7 +24,7 @@ Google Scholar is great at collecting publications but **terrible at showing th
 | 📊 **Summary panel**      | Totals for A\*, A, B, C papers on the profile |
 
 
-## Quick Installation (Developer Mode for Chrome)
+## Quick Install
 
 1.  **Download or Clone:**
     *   **Option A (Download ZIP):** Download the latest [release](https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker/releases/download/v0.1.5/Google-Scholar-Conference-Ranker-v0.1.5.zip). or click on the green "Code" button, then "Download ZIP". Extract the ZIP file to a folder on your computer.
