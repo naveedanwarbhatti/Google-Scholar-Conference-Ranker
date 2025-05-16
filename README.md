@@ -49,14 +49,7 @@ This extension solves this by:
     *   The "Google Scholar Conference Ranker" should now appear in your list of extensions and be enabled.
     *   Navigate to a Google Scholar profile page (e.g., `https://scholar.google.com/citations?user=...`). The extension should automatically run. You should see the progress bar, then the summary panel, and ranks next to papers.
 
-## Usage
 
-Once installed, simply navigate to any Google Scholar profile page that lists publications. The extension will:
-1.  Show a "CORE Rank Processing" progress bar in the right sidebar.
-2.  Fetch venue information for each publication.
-3.  Match venues against the CORE 2023 dataset.
-4.  Display a colored rank badge next to each recognized paper's title.
-5.  Replace the progress bar with a "CORE Rank Summary" panel in the sidebar showing the distribution of ranks.
 
 ## Data Source
 
