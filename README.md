@@ -51,9 +51,10 @@ This extension solves this by:
 
 
 
-## Data Source
 
-This extension currently uses the [**CORE 2023 Conference Rankings**](http://portal.core.edu.au/conf-ranks/).
+## Data Source and Acknowledgements
+
+This extension currently uses the [**CORE 2023 Conference Rankings**](http://portal.core.edu.au/conf-ranks/) courtesy of [**Australasian Computing Research and Education (CORE)**](https://www.linkedin.com/company/australasian-computing-research-and-education-core/).
 
 ## Contributing & Bug Reports (BETA)
 
