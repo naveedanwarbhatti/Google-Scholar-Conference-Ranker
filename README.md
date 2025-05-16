@@ -25,14 +25,13 @@ This extension solves this by:
 *   **Profile Summary Panel:** Injects a summary block on the right sidebar of Google Scholar profiles, showing paper counts for each rank.
     *   Includes a "BETA" label with a helpful tooltip for users.
     *   Provides a "Report Bug" link for easy feedback.
-*   **Keyword Exclusion:** Automatically assigns N/A to items identified as posters, demos, extended abstracts, etc., based on keywords in the paper title or venue name.
-*   **Efficient Processing:** Uses concurrent fetching to retrieve venue details quickly, with a progress bar for user feedback.
-*   **Wide Compatibility:** Designed to work on most international Google Scholar domains.
+
 
 ## Installation (Developer Mode for Chrome)
 
 1.  **Download or Clone:**
     *   **Option A (Download ZIP):** Go to the [Google Scholar Conference Ranker GitHub repository](https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker/). Click on the green "Code" button, then "Download ZIP". Extract the ZIP file to a folder on your computer.
+	
     *   **Option B (Clone with Git):** If you have Git installed, clone the repository:
         ```bash
         git clone https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker.git
