@@ -53,7 +53,7 @@ This extension solves this by:
 
 ## Data Source
 
-This extension currently uses the **CORE 2023 Conference Rankings**.
+This extension currently uses the [**CORE 2023 Conference Rankings**](http://portal.core.edu.au/conf-ranks/).
 
 ## Contributing & Bug Reports (BETA)
 
