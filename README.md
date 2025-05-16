@@ -30,7 +30,7 @@ This extension solves this by:
 ## Installation (Developer Mode for Chrome)
 
 1.  **Download or Clone:**
-    *   **Option A (Download ZIP):** Download the latest release. or click on the green "Code" button, then "Download ZIP". Extract the ZIP file to a folder on your computer.
+    *   **Option A (Download ZIP):** Download the latest [release](https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker/releases/download/v0.1.5/Google-Scholar-Conference-Ranker-v0.1.5.zip). or click on the green "Code" button, then "Download ZIP". Extract the ZIP file to a folder on your computer.
 	
     *   **Option B (Clone with Git):** If you have Git installed, clone the repository:
         ```bash
