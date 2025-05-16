@@ -11,7 +11,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 // Define the ranks we care about for counting and display
 const VALID_RANKS = ["A*", "A", "B", "C"];
-const IGNORE_KEYWORDS = ["poster", "demo", "abstract", "extended abstract", "doctoral consortium", "doctoral symposium", "computer communication review"];
+const IGNORE_KEYWORDS = ["workshop", "transactions", "poster", "demo", "abstract", "extended abstract", "doctoral consortium", "doctoral symposium", "computer communication review"];
 const STATUS_ELEMENT_ID = 'scholar-ranker-status-progress';
 const SUMMARY_PANEL_ID = 'scholar-ranker-summary';
 console.log("Google Scholar Ranker: Content script loaded.");
@@ -190,31 +190,47 @@ function cleanTextForComparison(text) {
     if (!text)
         return "";
     let cleanedText = text.toLowerCase();
-    cleanedText = cleanedText.replace(/ & /g, " and ");
-    cleanedText = cleanedText.replace(/&/g, " and "); // some authors have used '&' instead 'and' in conference title
-    cleanedText = cleanedText.replace(/[.,\/#!$%\^;\*:{}<>=\-_`~?"“()]/g, " ");
-    cleanedText = cleanedText.replace(/\s+/g, ' ');
+    // Normalize "&" to "and"
+    // Use regex with word boundaries (\b) if you only want to replace standalone '&'
+    // For simplicity here, a global replace works well for venue names.
+    cleanedText = cleanedText.replace(/ & /g, " and "); // Replace " & " with " and "
+    cleanedText = cleanedText.replace(/&/g, " and "); // Replace standalone & if not surrounded by spaces, ensure spaces are added
+    // Basic punctuation that might differ but try to keep structure for substring
+    cleanedText = cleanedText.replace(/[.,\/#!$%\^;\*:{}<>=\-_`~?"“()]/g, " "); // Added parentheses to the removal list here for general cleaning
+    cleanedText = cleanedText.replace(/\s+/g, ' '); // Normalize multiple spaces to a single space
     return cleanedText.trim();
 }
 function findRankForVenue(venueName, coreData) {
     const normalizedScholarVenueName = venueName.toLowerCase().trim();
+    // --- Initial Log for the venue being processed ---
+    console.log(`--- Evaluating GS Venue: "${venueName}" (Normalized: "${normalizedScholarVenueName}") ---`);
     if (!normalizedScholarVenueName)
         return "N/A";
+    // --- START: Specific non-conference exclusion ---
     const specificExclusions = [
         "sigcomm computer communication review",
     ];
     for (const exclusion of specificExclusions) {
         if (normalizedScholarVenueName.includes(exclusion)) {
+            console.log(`SPECIFIC EXCLUSION: GS Venue "${venueName}" contains "${exclusion}". Assigning N/A.`);
             return "N/A";
         }
     }
+    // --- END: Specific non-conference exclusion ---
+    // --- 1. Acronym-based match ---
     const extractedScholarAcronyms = extractPotentialAcronymsFromText(venueName);
     if (extractedScholarAcronyms.length > 0) {
+        // Log extracted acronyms from GS venue
+        console.log(`ACRONYM_MATCH_ATTEMPT: Extracted GS Acronyms: [${extractedScholarAcronyms.join(', ')}] for GS Venue: "${venueName}"`);
         for (const scholarAcro of extractedScholarAcronyms) {
             for (const entry of coreData) {
                 if (entry.acronym) {
                     const coreAcro = entry.acronym.toLowerCase().trim();
                     if (coreAcro && coreAcro === scholarAcro) {
+                        console.log(`!!! ACRONYM MATCH FOUND !!!`);
+                        console.log(`  GS Acro: "${scholarAcro}" (from GS Venue: "${venueName}")`);
+                        console.log(`  Matched CORE Acro: "${coreAcro}" (from CORE Title: "${entry.title}")`);
+                        console.log(`  Assigned Rank: ${entry.rank}`);
                         return VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
                     }
                 }
@@ -225,11 +241,13 @@ function findRankForVenue(venueName, coreData) {
         console.log(`ACRONYM_MATCH_ATTEMPT: No acronyms extracted for GS Venue: "${venueName}"`);
     }
     // --- 2. Full name substring match ---
+    console.log(`FULL_NAME_MATCH_ATTEMPT: Starting for GS Venue: "${venueName}"`);
     const gsCleanedForSubstring = cleanTextForComparison(normalizedScholarVenueName);
+    console.log(`  GS Venue Cleaned for Substring Match: "${gsCleanedForSubstring}"`);
     let bestMatchRank = null;
     let longestMatchLength = 0;
-    let bestMatchingCoreTitleOriginal = "";
-    let bestMatchingCoreTitleProcessed = "";
+    let bestMatchingCoreTitleOriginal = ""; // To store the original CORE title of the best match
+    let bestMatchingCoreTitleProcessed = ""; // To store the processed CORE title of the best match
     const orgPrefixesToIgnore = [
         "acm/ieee", "ieee/acm", // Combined first
         "acm sigplan", "acm sigops", "acm sigbed", // More specific ACM SIGs
@@ -250,19 +268,32 @@ function findRankForVenue(venueName, coreData) {
                 }
             } while (strippedSomething && coreTitleForMatch.length > 0);
             coreTitleForMatch = coreTitleForMatch.trim();
+            // Debugging for the LCTES case, and can be adapted for others
+            if (entry.acronym === "LCTES" || entry.title.toLowerCase().includes("data centric engineering")) { // Broaden debug for DCE
+                console.log(`  DEBUG_CORE_ENTRY: Acronym: "${entry.acronym}", Title: "${entry.title}"`);
+                console.log(`    CDT_orig_cleaned: "${originalCoreTitleCleaned}"`);
+                console.log(`    CDT_org_stripped (coreTitleForMatch): "${coreTitleForMatch}"`);
+            }
             if (gsCleanedForSubstring && coreTitleForMatch && coreTitleForMatch.length > 5) {
                 if (gsCleanedForSubstring.includes(coreTitleForMatch)) {
+                    // console.log(`    POTENTIAL Full name substring match: CORE (org-stripped) "${coreTitleForMatch}" in GS "${gsCleanedForSubstring}" (Rank: ${entry.rank})`);
                     if (coreTitleForMatch.length > longestMatchLength) {
                         longestMatchLength = coreTitleForMatch.length;
                         bestMatchRank = VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
                         bestMatchingCoreTitleOriginal = entry.title;
                         bestMatchingCoreTitleProcessed = coreTitleForMatch;
+                        // console.log(`      NEW BEST Substring Match: Length ${longestMatchLength}, Rank ${bestMatchRank}, CORE Title: "${entry.title}"`);
                     }
                 }
             }
         }
     }
     if (bestMatchRank !== null) {
+        console.log(`!!! BEST FULL NAME SUBSTRING MATCH CHOSEN for GS Venue: "${venueName}" !!!`);
+        console.log(`  Matched with CORE Title: "${bestMatchingCoreTitleOriginal}"`);
+        console.log(`  (Processed CORE Title for match: "${bestMatchingCoreTitleProcessed}")`);
+        console.log(`  (GS Venue processed for match: "${gsCleanedForSubstring}")`);
+        console.log(`  Longest matched part length: ${longestMatchLength}, Assigned Rank: ${bestMatchRank}`);
         return bestMatchRank;
     }
     console.log(`--- NO MATCH FOUND for GS Venue: "${venueName}" (GS Cleaned: "${gsCleanedForSubstring}", GS Acronyms: [${extractedScholarAcronyms.join(', ')}]) ---`);
@@ -270,36 +301,72 @@ function findRankForVenue(venueName, coreData) {
 }
 function extractPotentialAcronymsFromText(scholarVenueName) {
     const acronyms = new Set();
-    const lowerVenueName = scholarVenueName.toLowerCase();
-    const parentheticalMatches = lowerVenueName.match(/\(([^)]+)\)/g);
+    const originalVenueName = scholarVenueName; // Keep original for case-sensitive extraction logic
+    // --- Heuristic 1: Content within Parentheses ---
+    const parentheticalMatches = originalVenueName.match(/\(([^)]+)\)/g);
     if (parentheticalMatches) {
         parentheticalMatches.forEach(match => {
             const contentInParen = match.slice(1, -1).trim();
-            const parts = contentInParen.split(/[\s\-‑,.;:]+/);
-            if (parts.length > 0) {
-                const firstPart = parts[0];
-                if (firstPart.length >= 2 && firstPart.length <= 12 && /^[a-z][a-z0-9]*$/.test(firstPart) && !/^\d+$/.test(firstPart) && firstPart !== "was" && firstPart !== "formerly") {
-                    acronyms.add(firstPart);
-                }
+            const potentialAcronymsInParen = contentInParen.match(/([A-Z]{2,}[0-9']*\b|[A-Z]+[0-9]+[A-Z0-9]*\b|[A-Z][A-Z0-9]{1,9}\b)/g);
+            if (potentialAcronymsInParen) {
+                potentialAcronymsInParen.forEach(pAcronym => {
+                    let cleanedParenAcronym = pAcronym.replace(/'\d{2,4}$/, '').replace(/'s$/, '');
+                    if (cleanedParenAcronym.length >= 2 && cleanedParenAcronym.length <= 12 && !/^\d+$/.test(cleanedParenAcronym)) {
+                        acronyms.add(cleanedParenAcronym.toLowerCase());
+                    }
+                });
             }
-            if (contentInParen.length >= 2 && contentInParen.length <= 12 && /^[a-z][a-z0-9]*$/.test(contentInParen) && !/^\d+$/.test(contentInParen)) {
-                acronyms.add(contentInParen);
+            else {
+                if (contentInParen.length >= 2 && contentInParen.length <= 12 &&
+                    /^[A-Za-z0-9]+$/.test(contentInParen) &&
+                    !contentInParen.includes(" ") && !contentInParen.includes("-") &&
+                    !/^\d+$/.test(contentInParen) &&
+                    contentInParen.toLowerCase() !== "was" && contentInParen.toLowerCase() !== "formerly") {
+                    acronyms.add(contentInParen.toLowerCase());
+                }
             }
         });
     }
-    let textWithoutParens = lowerVenueName.replace(/\s*\([^)]*\)\s*/g, ' ');
-    textWithoutParens = textWithoutParens.replace(/\b(proceedings\s*(of\s*)?(the\s*)?|proc\.\s*(of\s*)?(the\s*)?|journal\s*of\s*(the\s*)?)\b/gi, ' ');
-    const words = textWithoutParens.split(/[\s.,:;\-‑\/&]+/);
+    // --- Heuristic 2: Standalone Acronym-Like Words (Revised) ---
+    let textWithoutParens = originalVenueName.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+    // Further clean common prefixes that are not acronyms themselves
+    textWithoutParens = textWithoutParens.replace(/\b(Proceedings\s+of\s+the|Proc\.\s+of\s+the|International\s+Conference\s+on|Intl\.\s+Conf\.\s+on|Conference\s+on|Symposium\s+on|Workshop\s+on|Journal\s+of)\b/gi, ' ').trim();
+    const words = textWithoutParens.split(/[\s\-‑\/.,:;&]+/);
     const commonNonAcronyms = new Set([
-        'proc', 'data', 'proceedings', 'journal', 'conference', 'conf', 'symposium', 'symp', 'workshop', 'ws', 'international', 'intl', 'natl', 'national', 'annual', 'acm', 'ieee', 'usenix', 'sig', 'vol', 'volume', 'no', 'number', 'pp', 'page', 'pages', 'part', 'edition', 'of', 'the', 'on', 'in', 'and', 'for', 'to', 'at', 'st', 'nd', 'rd', 'th', 'springer', 'elsevier', 'wiley', 'press', 'extended', 'abstract', 'abstracts', 'poster', 'session', 'sessions', 'doctoral', 'companion', 'joint', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'advances', 'systems', 'networks', 'computing', 'applications', 'technology', 'technologies', 'research', 'science', 'sciences', 'engineering', 'management', 'information', 'communication', 'communications', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 'transactions', 'letters', 'advances', 'bulletin', 'archive', 'archives', 'series', 'chapter', 'section', 'tutorial', 'tutorials', 'report', 'technical', 'tech', ...(Array.from({ length: 65 }, (_, i) => (1980 + i).toString()))
+        'proc', 'data', 'services', 'models', 'security', 'time', 'proceedings', 'journal', 'conference', 'conf', 'symposium', 'symp', 'workshop', 'ws', 'international', 'intl', 'natl', 'national', 'annual', 'acm', 'ieee', 'usenix', 'sig', 'vol', 'volume', 'no', 'number', 'pp', 'page', 'pages', 'part', 'edition', 'of', 'the', 'on', 'in', 'and', 'for', 'to', 'at', 'st', 'nd', 'rd', 'th', 'springer', 'elsevier', 'wiley', 'press', 'extended', 'abstract', 'abstracts', 'poster', 'session', 'sessions', 'doctoral', 'companion', 'joint', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'advances', 'systems', 'networks', 'computing', 'applications', 'technology', 'technologies', 'research', 'science', 'sciences', 'engineering', 'management', 'information', 'communication', 'communications', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 'transactions', 'letters', 'advances', 'bulletin', 'archive', 'archives', 'series', 'chapter', 'section', 'tutorial', 'tutorials', 'report', 'technical', 'tech', ...(Array.from({ length: 75 }, (_, i) => (1970 + i).toString())) // Extended year range
     ]);
-    for (const word of words) {
-        const cleanWord = word.trim();
-        if (cleanWord.length >= 2 && cleanWord.length <= 12 && /^[a-z][a-z0-9\-]*[a-z0-9]$/.test(cleanWord) && !/^[0-9\-]+$/.test(cleanWord) && !commonNonAcronyms.has(cleanWord)) {
-            acronyms.add(cleanWord);
+    words.forEach(word => {
+        const cleanWordOriginalCase = word.trim();
+        if (cleanWordOriginalCase.length >= 2 && cleanWordOriginalCase.length <= 12 && !/^\d+$/.test(cleanWordOriginalCase)) {
+            // Regex for typical acronym patterns:
+            // 1. All caps: FOO, BAR1
+            // 2. Mixed case with internal caps: SenSys, AsiaCCS, HotNets
+            // 3. Caps-Numbers-Caps: W3C (already covered by all caps with numbers)
+            // Does not match simple capitalized words like "Conference" or "Object".
+            if ((!commonNonAcronyms.has(cleanWordOriginalCase.toLowerCase())) &&
+                (/^[A-Z0-9]+$/.test(cleanWordOriginalCase) || // ALL CAPS (and numbers)
+                    /^[A-Z][a-z]+[A-Z]+[A-Za-z0-9]*$/.test(cleanWordOriginalCase) // Cap->lowers->Caps->(optional more) e.g. SenSys, AsiaCCS
+                )) {
+                acronyms.add(cleanWordOriginalCase.toLowerCase());
+            }
         }
+    });
+    // Fallback for when the entire venueName is the acronym (and wasn't caught above)
+    if (acronyms.size === 0 &&
+        originalVenueName.length >= 2 && originalVenueName.length <= 10 &&
+        !originalVenueName.includes(" ") && // Typically single word if it's the whole name and an acronym
+        /^[A-Za-z0-9]+$/.test(originalVenueName) && // Alphanumeric
+        !/^\d+$/.test(originalVenueName) &&
+        !commonNonAcronyms.has(originalVenueName.toLowerCase())) {
+        acronyms.add(originalVenueName.toLowerCase());
     }
-    return Array.from(acronyms);
+    const resultAcronyms = Array.from(acronyms);
+    // if (resultAcronyms.length > 0) {
+    //    console.log(`EXTRACTED ACRONYMS for "${scholarVenueName}": [${resultAcronyms.join(', ')}]`);
+    // } else {
+    //    console.log(`NO ACRONYMS extracted for "${scholarVenueName}"`);
+    // }
+    return resultAcronyms;
 }
 function displayRankBadgeAfterTitle(rowElement, rank) {
     const titleCell = rowElement.querySelector('td.gsc_a_t');
@@ -421,16 +488,18 @@ function updateStatusElement(statusContainer, processed, total) {
     if (statusText)
         statusText.textContent = `Processing ${processed} / ${total}...`;
 }
+// --- MODIFIED displaySummaryPanel ---
 function displaySummaryPanel(rankCounts) {
     var _a, _b;
     const existingStatusElement = document.getElementById(STATUS_ELEMENT_ID);
     const parentOfStatus = existingStatusElement === null || existingStatusElement === void 0 ? void 0 : existingStatusElement.parentNode;
-    (_a = document.getElementById(SUMMARY_PANEL_ID)) === null || _a === void 0 ? void 0 : _a.remove();
+    (_a = document.getElementById(SUMMARY_PANEL_ID)) === null || _a === void 0 ? void 0 : _a.remove(); // Remove old summary if any
     const panel = document.createElement('div');
     panel.id = SUMMARY_PANEL_ID;
     panel.classList.add('gsc_rsb_s', 'gsc_prf_pnl');
     panel.style.padding = '10px';
     panel.style.marginBottom = '15px';
+    // --- Header with Beta Label (with tooltip) and Report Bug Link ---
     const headerDiv = document.createElement('div');
     headerDiv.style.display = 'flex';
     headerDiv.style.alignItems = 'center';
@@ -443,6 +512,7 @@ function displaySummaryPanel(rankCounts) {
     const summaryTitle = document.createElement('span');
     summaryTitle.textContent = 'CORE Rank Summary';
     headerDiv.appendChild(summaryTitle);
+    // Beta Label with Tooltip
     const betaLabel = document.createElement('span');
     betaLabel.textContent = 'BETA';
     betaLabel.style.marginLeft = '8px';
@@ -453,21 +523,24 @@ function displaySummaryPanel(rankCounts) {
     betaLabel.style.backgroundColor = '#6c757d';
     betaLabel.style.borderRadius = '10px';
     betaLabel.style.verticalAlign = 'middle';
-    betaLabel.style.cursor = 'help';
-    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\n" +
+    betaLabel.style.cursor = 'help'; // Add help cursor to indicate tooltip
+    betaLabel.setAttribute('title', // Moved tooltip here
+    "Developed by Naveed Anwar Bhatti.\n" +
         "It is free and open source.\n" +
         "We are currently using CORE2023 rankings only.\n" +
         "Help us spot inconsistencies!\n" +
         "For any issues, please click on “Report Bug”.");
     headerDiv.appendChild(betaLabel);
+    // --- Question Mark Icon REMOVED ---
+    // Report Bug Link (Text Only, smaller, red)
     const reportBugLink = document.createElement('a');
     reportBugLink.href = "https://forms.office.com/r/PbSzWaQmpJ";
     reportBugLink.target = "_blank";
-    reportBugLink.style.marginLeft = '10px';
+    reportBugLink.style.marginLeft = '10px'; // Increased margin a bit as question mark is gone
     reportBugLink.style.textDecoration = 'none';
-    reportBugLink.style.color = '#D32F2F';
-    reportBugLink.style.fontSize = '0.75em';
-    reportBugLink.style.fontWeight = 'normal';
+    reportBugLink.style.color = '#D32F2F'; // Red color for the link
+    reportBugLink.style.fontSize = '0.75em'; // Reduced font size
+    reportBugLink.style.fontWeight = 'normal'; // Normal weight, or '500' for slightly bolder
     reportBugLink.style.verticalAlign = 'middle';
     reportBugLink.textContent = 'Report Bug';
     reportBugLink.setAttribute('title', 'Report a bug or inconsistency (opens new tab)');
@@ -549,6 +622,7 @@ function displaySummaryPanel(rankCounts) {
         }
     }
 }
+// --- END MODIFIED displaySummaryPanel ---
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
         console.log("Google Scholar Ranker: main() started.");
