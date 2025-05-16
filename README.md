@@ -59,7 +59,7 @@ This extension currently uses the [**CORE 2023 Conference Rankings**](http://por
 
 This extension is currently in BETA. Your feedback is invaluable!
 
-*   **Report a Bug:** Please use the "Report Bug" link in the summary panel (links to: [https://forms.office.com/r/PbSzWaQmpJ](https://forms.office.com/r/PbSzWaQmpJ)) or open an issue on the [GitHub Issues page](https://github.com/your-username/your-repo-name/issues) (replace with your URL). When reporting, please include:
+*   **Report a Bug:** Please use the ["Report Bug"](https://forms.office.com/r/PbSzWaQmpJ) link in the summary panel or open an issue on the [GitHub Issues page](https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker//issues). When reporting, please include:
     *   The Google Scholar profile URL.
     *   The specific paper/venue that was mismatched or not detected.
     *   The expected rank/behavior.
