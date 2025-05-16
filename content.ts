@@ -419,7 +419,7 @@ function updateStatusElement(statusContainer: HTMLElement, processed: number, to
 }
 
 
-/
+
 function displaySummaryPanel(rankCounts: Record<string, number>) {
     const existingStatusElement = document.getElementById(STATUS_ELEMENT_ID);
     const parentOfStatus = existingStatusElement?.parentNode;
