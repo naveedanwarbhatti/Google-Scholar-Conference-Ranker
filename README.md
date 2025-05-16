@@ -6,7 +6,7 @@
 
 This Chrome extension enhances your Google Scholar experience by automatically fetching and displaying [CORE Conference Rankings](http://portal.core.edu.au/conf-ranks/) (currently using CORE 2023 data) for publications. It helps you quickly assess the prestige of conference venues without leaving the Scholar page.
 
-![Screenshot of Extension in Action](images\Screenshot.png)
+![Screenshot of Extension in Action](images/Screenshot.png)
 
 
 ## Why This Extension?
