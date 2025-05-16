@@ -17,7 +17,7 @@ Google Scholar is great at collecting publications but **terrible at showing th
 
 ## Features
 
-|                           |                                               |
+
 | ------------------------- | --------------------------------------------- |
 | 🎯 **Automatic matching** | Apply multiple heuristics for matching     |
 | 🏷 **Rank badges**        | A\*, A, B, C colour‑coded inline              |
