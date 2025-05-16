@@ -9,7 +9,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-// Define the ranks we care about for counting and display
 const VALID_RANKS = ["A*", "A", "B", "C"];
 const IGNORE_KEYWORDS = ["workshop", "transactions", "poster", "demo", "abstract", "extended abstract", "doctoral consortium", "doctoral symposium", "computer communication review"];
 const STATUS_ELEMENT_ID = 'scholar-ranker-status-progress';
@@ -190,47 +189,31 @@ function cleanTextForComparison(text) {
     if (!text)
         return "";
     let cleanedText = text.toLowerCase();
-    // Normalize "&" to "and"
-    // Use regex with word boundaries (\b) if you only want to replace standalone '&'
-    // For simplicity here, a global replace works well for venue names.
-    cleanedText = cleanedText.replace(/ & /g, " and "); // Replace " & " with " and "
-    cleanedText = cleanedText.replace(/&/g, " and "); // Replace standalone & if not surrounded by spaces, ensure spaces are added
-    // Basic punctuation that might differ but try to keep structure for substring
-    cleanedText = cleanedText.replace(/[.,\/#!$%\^;\*:{}<>=\-_`~?"“()]/g, " "); // Added parentheses to the removal list here for general cleaning
-    cleanedText = cleanedText.replace(/\s+/g, ' '); // Normalize multiple spaces to a single space
+    cleanedText = cleanedText.replace(/ & /g, " and ");
+    cleanedText = cleanedText.replace(/&/g, " and ");
+    cleanedText = cleanedText.replace(/[.,\/#!$%\^;\*:{}<>=\-_`~?"“()]/g, " ");
+    cleanedText = cleanedText.replace(/\s+/g, ' ');
     return cleanedText.trim();
 }
 function findRankForVenue(venueName, coreData) {
     const normalizedScholarVenueName = venueName.toLowerCase().trim();
-    // --- Initial Log for the venue being processed ---
-    console.log(`--- Evaluating GS Venue: "${venueName}" (Normalized: "${normalizedScholarVenueName}") ---`);
     if (!normalizedScholarVenueName)
         return "N/A";
-    // --- START: Specific non-conference exclusion ---
     const specificExclusions = [
         "sigcomm computer communication review",
     ];
     for (const exclusion of specificExclusions) {
         if (normalizedScholarVenueName.includes(exclusion)) {
-            console.log(`SPECIFIC EXCLUSION: GS Venue "${venueName}" contains "${exclusion}". Assigning N/A.`);
             return "N/A";
         }
     }
-    // --- END: Specific non-conference exclusion ---
-    // --- 1. Acronym-based match ---
     const extractedScholarAcronyms = extractPotentialAcronymsFromText(venueName);
     if (extractedScholarAcronyms.length > 0) {
-        // Log extracted acronyms from GS venue
-        console.log(`ACRONYM_MATCH_ATTEMPT: Extracted GS Acronyms: [${extractedScholarAcronyms.join(', ')}] for GS Venue: "${venueName}"`);
         for (const scholarAcro of extractedScholarAcronyms) {
             for (const entry of coreData) {
                 if (entry.acronym) {
                     const coreAcro = entry.acronym.toLowerCase().trim();
                     if (coreAcro && coreAcro === scholarAcro) {
-                        console.log(`!!! ACRONYM MATCH FOUND !!!`);
-                        console.log(`  GS Acro: "${scholarAcro}" (from GS Venue: "${venueName}")`);
-                        console.log(`  Matched CORE Acro: "${coreAcro}" (from CORE Title: "${entry.title}")`);
-                        console.log(`  Assigned Rank: ${entry.rank}`);
                         return VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
                     }
                 }
@@ -240,10 +223,7 @@ function findRankForVenue(venueName, coreData) {
     else {
         console.log(`ACRONYM_MATCH_ATTEMPT: No acronyms extracted for GS Venue: "${venueName}"`);
     }
-    // --- 2. Full name substring match ---
-    console.log(`FULL_NAME_MATCH_ATTEMPT: Starting for GS Venue: "${venueName}"`);
     const gsCleanedForSubstring = cleanTextForComparison(normalizedScholarVenueName);
-    console.log(`  GS Venue Cleaned for Substring Match: "${gsCleanedForSubstring}"`);
     let bestMatchRank = null;
     let longestMatchLength = 0;
     let bestMatchingCoreTitleOriginal = ""; // To store the original CORE title of the best match
@@ -268,12 +248,6 @@ function findRankForVenue(venueName, coreData) {
                 }
             } while (strippedSomething && coreTitleForMatch.length > 0);
             coreTitleForMatch = coreTitleForMatch.trim();
-            // Debugging for the LCTES case, and can be adapted for others
-            if (entry.acronym === "LCTES" || entry.title.toLowerCase().includes("data centric engineering")) { // Broaden debug for DCE
-                console.log(`  DEBUG_CORE_ENTRY: Acronym: "${entry.acronym}", Title: "${entry.title}"`);
-                console.log(`    CDT_orig_cleaned: "${originalCoreTitleCleaned}"`);
-                console.log(`    CDT_org_stripped (coreTitleForMatch): "${coreTitleForMatch}"`);
-            }
             if (gsCleanedForSubstring && coreTitleForMatch && coreTitleForMatch.length > 5) {
                 if (gsCleanedForSubstring.includes(coreTitleForMatch)) {
                     // console.log(`    POTENTIAL Full name substring match: CORE (org-stripped) "${coreTitleForMatch}" in GS "${gsCleanedForSubstring}" (Rank: ${entry.rank})`);
@@ -289,11 +263,6 @@ function findRankForVenue(venueName, coreData) {
         }
     }
     if (bestMatchRank !== null) {
-        console.log(`!!! BEST FULL NAME SUBSTRING MATCH CHOSEN for GS Venue: "${venueName}" !!!`);
-        console.log(`  Matched with CORE Title: "${bestMatchingCoreTitleOriginal}"`);
-        console.log(`  (Processed CORE Title for match: "${bestMatchingCoreTitleProcessed}")`);
-        console.log(`  (GS Venue processed for match: "${gsCleanedForSubstring}")`);
-        console.log(`  Longest matched part length: ${longestMatchLength}, Assigned Rank: ${bestMatchRank}`);
         return bestMatchRank;
     }
     console.log(`--- NO MATCH FOUND for GS Venue: "${venueName}" (GS Cleaned: "${gsCleanedForSubstring}", GS Acronyms: [${extractedScholarAcronyms.join(', ')}]) ---`);
@@ -338,11 +307,6 @@ function extractPotentialAcronymsFromText(scholarVenueName) {
     words.forEach(word => {
         const cleanWordOriginalCase = word.trim();
         if (cleanWordOriginalCase.length >= 2 && cleanWordOriginalCase.length <= 12 && !/^\d+$/.test(cleanWordOriginalCase)) {
-            // Regex for typical acronym patterns:
-            // 1. All caps: FOO, BAR1
-            // 2. Mixed case with internal caps: SenSys, AsiaCCS, HotNets
-            // 3. Caps-Numbers-Caps: W3C (already covered by all caps with numbers)
-            // Does not match simple capitalized words like "Conference" or "Object".
             if ((!commonNonAcronyms.has(cleanWordOriginalCase.toLowerCase())) &&
                 (/^[A-Z0-9]+$/.test(cleanWordOriginalCase) || // ALL CAPS (and numbers)
                     /^[A-Z][a-z]+[A-Z]+[A-Za-z0-9]*$/.test(cleanWordOriginalCase) // Cap->lowers->Caps->(optional more) e.g. SenSys, AsiaCCS
@@ -351,7 +315,6 @@ function extractPotentialAcronymsFromText(scholarVenueName) {
             }
         }
     });
-    // Fallback for when the entire venueName is the acronym (and wasn't caught above)
     if (acronyms.size === 0 &&
         originalVenueName.length >= 2 && originalVenueName.length <= 10 &&
         !originalVenueName.includes(" ") && // Typically single word if it's the whole name and an acronym
@@ -361,11 +324,6 @@ function extractPotentialAcronymsFromText(scholarVenueName) {
         acronyms.add(originalVenueName.toLowerCase());
     }
     const resultAcronyms = Array.from(acronyms);
-    // if (resultAcronyms.length > 0) {
-    //    console.log(`EXTRACTED ACRONYMS for "${scholarVenueName}": [${resultAcronyms.join(', ')}]`);
-    // } else {
-    //    console.log(`NO ACRONYMS extracted for "${scholarVenueName}"`);
-    // }
     return resultAcronyms;
 }
 function displayRankBadgeAfterTitle(rowElement, rank) {
@@ -488,7 +446,6 @@ function updateStatusElement(statusContainer, processed, total) {
     if (statusText)
         statusText.textContent = `Processing ${processed} / ${total}...`;
 }
-// --- MODIFIED displaySummaryPanel ---
 function displaySummaryPanel(rankCounts) {
     var _a, _b;
     const existingStatusElement = document.getElementById(STATUS_ELEMENT_ID);
@@ -499,7 +456,6 @@ function displaySummaryPanel(rankCounts) {
     panel.classList.add('gsc_rsb_s', 'gsc_prf_pnl');
     panel.style.padding = '10px';
     panel.style.marginBottom = '15px';
-    // --- Header with Beta Label (with tooltip) and Report Bug Link ---
     const headerDiv = document.createElement('div');
     headerDiv.style.display = 'flex';
     headerDiv.style.alignItems = 'center';
@@ -512,7 +468,6 @@ function displaySummaryPanel(rankCounts) {
     const summaryTitle = document.createElement('span');
     summaryTitle.textContent = 'CORE Rank Summary';
     headerDiv.appendChild(summaryTitle);
-    // Beta Label with Tooltip
     const betaLabel = document.createElement('span');
     betaLabel.textContent = 'BETA';
     betaLabel.style.marginLeft = '8px';
@@ -523,16 +478,13 @@ function displaySummaryPanel(rankCounts) {
     betaLabel.style.backgroundColor = '#6c757d';
     betaLabel.style.borderRadius = '10px';
     betaLabel.style.verticalAlign = 'middle';
-    betaLabel.style.cursor = 'help'; // Add help cursor to indicate tooltip
-    betaLabel.setAttribute('title', // Moved tooltip here
-    "Developed by Naveed Anwar Bhatti.\n" +
+    betaLabel.style.cursor = 'help';
+    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\n" +
         "It is free and open source.\n" +
         "We are currently using CORE2023 rankings only.\n" +
         "Help us spot inconsistencies!\n" +
         "For any issues, please click on “Report Bug”.");
     headerDiv.appendChild(betaLabel);
-    // --- Question Mark Icon REMOVED ---
-    // Report Bug Link (Text Only, smaller, red)
     const reportBugLink = document.createElement('a');
     reportBugLink.href = "https://forms.office.com/r/PbSzWaQmpJ";
     reportBugLink.target = "_blank";
@@ -622,7 +574,6 @@ function displaySummaryPanel(rankCounts) {
         }
     }
 }
-// --- END MODIFIED displaySummaryPanel ---
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
         console.log("Google Scholar Ranker: main() started.");
