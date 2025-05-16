@@ -31,36 +31,23 @@ This extension solves this by:
 
 ## Installation (Developer Mode for Chrome)
 
-Since this extension is not yet on the Chrome Web Store (or if you're testing a development version), you can load it manually in Developer Mode:
-
 1.  **Download or Clone:**
-    *   **Option A (Download ZIP):** Go to the [GitHub repository page](https://github.com/your-username/your-repo-name) (replace with your actual repo URL). Click on the green "Code" button, then "Download ZIP". Extract the ZIP file to a folder on your computer.
+    *   **Option A (Download ZIP):** Go to the [Google Scholar Conference Ranker GitHub repository](https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker/). Click on the green "Code" button, then "Download ZIP". Extract the ZIP file to a folder on your computer.
     *   **Option B (Clone with Git):** If you have Git installed, clone the repository:
         ```bash
-        git clone https://github.com/your-username/your-repo-name.git
-        cd your-repo-name
+        git clone https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker.git
         ```
+        The `dist/content.js` file (the compiled JavaScript) is included in the repository.
 
-2.  **Build the Content Script (if using TypeScript):**
-    This extension uses TypeScript (`content.ts`). You need to compile it to JavaScript (`content.js`).
-    *   Make sure you have Node.js and npm installed.
-    *   Open a terminal in the extension's root directory (where `package.json` and `tsconfig.json` would be, if you have them).
-    *   Install TypeScript if you haven't: `npm install -g typescript` (or `npm install typescript --save-dev` for a local project install).
-    *   Compile the TypeScript file:
-        ```bash
-        npx tsc
-        ```
-        This will generate a `dist/content.js` file (or wherever your `tsconfig.json` specifies the output). Ensure your `manifest.json` points to this compiled JavaScript file (e.g., `"js": ["dist/content.js"]`).
-
-3.  **Load the Extension in Chrome:**
+2.  **Load the Extension in Chrome:**
     *   Open Google Chrome.
-    *   Navigate to `chrome://extensions`.
-    *   Enable **"Developer mode"** using the toggle switch in the top-right corner.
-    *   Click the **"Load unpacked"** button that appears.
-    *   Select the **root directory** of the extension (the folder where `manifest.json` is located, e.g., `scholar-ranker` if you extracted/cloned it there).
+    *   Navigate to `chrome://extensions` (or by clicking Menu -> Extensions -> Manage Extensions).
+    *   Enable **"Developer mode"** using the toggle switch, usually found in the top-right corner.
+    *   Click the **"Load unpacked"** button that appears (usually on the top-left).
+    *   Select the **root directory** of the extension (the folder where `manifest.json` is located, e.g., the `Google-Scholar-Conference-Ranker` folder you downloaded/cloned).
 
-4.  **Verify:**
-    *   The "Google Scholar Conference Ranker" should now appear in your list of extensions.
+3.  **Verify:**
+    *   The "Google Scholar Conference Ranker" should now appear in your list of extensions and be enabled.
     *   Navigate to a Google Scholar profile page (e.g., `https://scholar.google.com/citations?user=...`). The extension should automatically run. You should see the progress bar, then the summary panel, and ranks next to papers.
 
 ## Usage
