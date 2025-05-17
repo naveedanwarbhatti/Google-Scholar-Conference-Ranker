@@ -10,10 +10,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 const VALID_RANKS = ["A*", "A", "B", "C"];
-const IGNORE_KEYWORDS = ["workshop", "transactions", "poster", "demo", "abstract", "extended abstract", "doctoral consortium", "doctoral symposium", "computer communication review"];
+const IGNORE_KEYWORDS = ["workshop", "transactions", "journal", "poster", "demo", "abstract", "extended abstract", "doctoral consortium", "doctoral symposium", "computer communication review"];
 const STATUS_ELEMENT_ID = 'scholar-ranker-status-progress';
 const SUMMARY_PANEL_ID = 'scholar-ranker-summary';
 console.log("Google Scholar Ranker: Content script loaded.");
+const coreDataCache = {};
+// --- START: expandAllPublications function ---
 function expandAllPublications(statusElement) {
     return __awaiter(this, void 0, void 0, function* () {
         console.log("Google Scholar Ranker: Attempting to expand all publications...");
@@ -72,55 +74,74 @@ function expandAllPublications(statusElement) {
         }
     });
 }
-function loadCoreData() {
+// --- END: expandAllPublications function ---
+function getCoreDataFileForYear(pubYear) {
+    if (pubYear === null) {
+        return 'core/CORE_2023.json'; // Default to newest if year is unknown
+    }
+    if (pubYear >= 2023)
+        return 'core/CORE_2023.json';
+    if (pubYear >= 2021)
+        return 'core/CORE_2021.json'; // Covers 2021-2022
+    if (pubYear >= 2020)
+        return 'core/CORE_2020.json'; // Covers 2020
+    if (pubYear >= 2018)
+        return 'core/CORE_2018.json'; // Covers 2018-2019
+    if (pubYear >= 2017)
+        return 'core/CORE_2017.json'; // Covers 2017
+    // For any year 2014, 2015, 2016, or *anything before 2014*
+    if (pubYear <= 2016) { // This condition now covers 2014-2016 AND anything before 2014
+        return 'core/CORE_2014.json';
+    }
+    // Fallback for any unexpected scenario (e.g., if a future year isn't explicitly handled above yet,
+    // though the >= 2023 condition should catch those).
+    // Defaulting to the oldest available (2014) as per your new requirement for pre-2014 years.
+    console.warn(`Publication year ${pubYear} did not match specific ranges, defaulting to most recent one.`);
+    return 'core/CORE_2023.json';
+}
+function loadCoreDataForFile(coreDataFile) {
     return __awaiter(this, void 0, void 0, function* () {
+        if (coreDataCache[coreDataFile]) {
+            return coreDataCache[coreDataFile];
+        }
+        console.log(`Loading CORE data from: ${coreDataFile}`);
         try {
-            const url = chrome.runtime.getURL('core_data.json');
+            const url = chrome.runtime.getURL(coreDataFile);
             const response = yield fetch(url);
             if (!response.ok)
-                throw new Error(`Failed to fetch core_data.json: ${response.statusText} (URL: ${url})`);
+                throw new Error(`Failed to fetch ${coreDataFile}: ${response.statusText} (URL: ${url})`);
             const jsonData = yield response.json();
             if (!Array.isArray(jsonData)) {
-                console.error("CORE data is not an array. Data received:", jsonData);
+                console.error(`CORE data from ${coreDataFile} is not an array. Data received:`, jsonData);
                 return [];
             }
-            return jsonData.map((rawEntry) => {
+            const parsedData = jsonData.map((rawEntry) => {
                 const entry = { title: "", acronym: "", rank: "N/A" };
-                if (typeof rawEntry["International Conference on Advanced Communications and Computation"] === 'string')
-                    entry.title = rawEntry["International Conference on Advanced Communications and Computation"];
+                let potentialTitleKey = "International Conference on Advanced Communications and Computation";
+                let potentialAcronymKey = "INFOCOMP";
+                if (coreDataFile.includes('2018') || coreDataFile.includes('2017') || coreDataFile.includes('2014')) {
+                    potentialTitleKey = "Information Retrieval Facility Conference";
+                    potentialAcronymKey = "IRFC";
+                }
+                if (typeof rawEntry[potentialTitleKey] === 'string')
+                    entry.title = rawEntry[potentialTitleKey];
                 else if (typeof rawEntry.title === 'string')
                     entry.title = rawEntry.title;
                 else if (typeof rawEntry.Title === 'string')
                     entry.title = rawEntry.Title;
-                else if (typeof rawEntry.JournalTitle === 'string')
-                    entry.title = rawEntry.JournalTitle;
-                else if (typeof rawEntry["Full Journal Title"] === 'string')
-                    entry.title = rawEntry["Full Journal Title"];
-                else if (typeof rawEntry["Full Name"] === 'string')
-                    entry.title = rawEntry["Full Name"];
-                else if (typeof rawEntry.source === 'string')
-                    entry.title = rawEntry.source;
-                if (typeof rawEntry.INFOCOMP === 'string')
-                    entry.acronym = rawEntry.INFOCOMP;
+                if (typeof rawEntry[potentialAcronymKey] === 'string')
+                    entry.acronym = rawEntry[potentialAcronymKey];
                 else if (typeof rawEntry.acronym === 'string')
                     entry.acronym = rawEntry.acronym;
                 else if (typeof rawEntry.Acronym === 'string')
                     entry.acronym = rawEntry.Acronym;
-                else if (typeof rawEntry.ConferenceAcro === 'string')
-                    entry.acronym = rawEntry.ConferenceAcro;
-                else if (typeof rawEntry.Abbreviation === 'string')
-                    entry.acronym = rawEntry.Abbreviation;
                 let foundRank = undefined;
                 if (typeof rawEntry.Unranked === 'string')
                     foundRank = rawEntry.Unranked;
                 else if (typeof rawEntry.rank === 'string')
                     foundRank = rawEntry.rank;
-                else if (typeof rawEntry.Rank === 'string')
-                    foundRank = rawEntry.Rank;
                 else if (typeof rawEntry.CORE_Rating === 'string')
                     foundRank = rawEntry.CORE_Rating;
-                else if (typeof rawEntry["CORE Rank"] === 'string')
-                    foundRank = rawEntry["CORE Rank"];
                 else if (typeof rawEntry.Rating === 'string')
                     foundRank = rawEntry.Rating;
                 if (foundRank) {
@@ -132,146 +153,198 @@ function loadCoreData() {
                 entry.acronym = String(entry.acronym || "").trim();
                 return (entry.title || entry.acronym) ? entry : null;
             }).filter(entry => entry !== null);
+            coreDataCache[coreDataFile] = parsedData;
+            return parsedData;
         }
         catch (error) {
-            console.error("Error loading or parsing CORE data:", error);
+            console.error(`Error loading or parsing CORE data from ${coreDataFile}:`, error);
             return [];
         }
     });
 }
-function fetchAndExtractVenueName(publicationUrl) {
+function fetchVenueAndYear(publicationUrl) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d;
+        var _a, _b, _c, _d, _e, _f;
+        let venueName = null;
+        let publicationYear = null;
         try {
             const response = yield fetch(publicationUrl);
             if (!response.ok) {
                 console.warn(`Failed to fetch ${publicationUrl}: ${response.statusText} (${response.status})`);
-                return null;
+                return { venueName, publicationYear };
             }
             const htmlText = yield response.text();
             const parser = new DOMParser();
             const doc = parser.parseFromString(htmlText, 'text/html');
-            let venueNameFromDetail = '';
-            const targetLabels = ['conference', 'proceedings', 'book title', 'series', 'source', 'publication', 'book', 'journal'];
+            const targetLabels = ['journal', 'conference', 'proceedings', 'book title', 'series', 'source', 'publication', 'book'];
+            const yearLabel = 'publication date';
+            let foundInOci = false;
             const sectionsOci = doc.querySelectorAll('#gsc_oci_table div.gs_scl');
             if (sectionsOci.length > 0) {
                 for (const section of sectionsOci) {
                     const fieldEl = section.querySelector('div.gsc_oci_field');
                     const valueEl = section.querySelector('div.gsc_oci_value');
-                    if (fieldEl && valueEl && targetLabels.includes(((_a = fieldEl.textContent) === null || _a === void 0 ? void 0 : _a.trim().toLowerCase()) || '')) {
-                        venueNameFromDetail = ((_b = valueEl.textContent) === null || _b === void 0 ? void 0 : _b.trim()) || '';
-                        if (venueNameFromDetail)
-                            break;
+                    if (fieldEl && valueEl) {
+                        const label = ((_a = fieldEl.textContent) === null || _a === void 0 ? void 0 : _a.trim().toLowerCase()) || '';
+                        if (!venueName && targetLabels.includes(label)) {
+                            venueName = ((_b = valueEl.textContent) === null || _b === void 0 ? void 0 : _b.trim()) || null;
+                            foundInOci = true;
+                        }
+                        if (!publicationYear && label === yearLabel) {
+                            const yearText = (_c = valueEl.textContent) === null || _c === void 0 ? void 0 : _c.trim().split('/')[0];
+                            if (yearText && /^\d{4}$/.test(yearText)) {
+                                publicationYear = parseInt(yearText, 10);
+                            }
+                            foundInOci = true;
+                        }
                     }
+                    if (venueName && publicationYear)
+                        break;
                 }
             }
-            if (!venueNameFromDetail) {
+            if (!venueName || !publicationYear || !foundInOci) {
                 const rowsVcd = doc.querySelectorAll('#gsc_vcd_table tr');
                 for (const row of rowsVcd) {
                     const fieldEl = row.querySelector('td.gsc_vcd_field');
                     const valueEl = row.querySelector('td.gsc_vcd_value');
-                    if (fieldEl && valueEl && targetLabels.includes(((_c = fieldEl.textContent) === null || _c === void 0 ? void 0 : _c.trim().toLowerCase()) || '')) {
-                        venueNameFromDetail = ((_d = valueEl.textContent) === null || _d === void 0 ? void 0 : _d.trim()) || '';
-                        if (venueNameFromDetail)
-                            break;
+                    if (fieldEl && valueEl) {
+                        const label = ((_d = fieldEl.textContent) === null || _d === void 0 ? void 0 : _d.trim().toLowerCase()) || '';
+                        if (!venueName && targetLabels.includes(label)) {
+                            venueName = ((_e = valueEl.textContent) === null || _e === void 0 ? void 0 : _e.trim()) || null;
+                        }
+                        if (!publicationYear && label === yearLabel) {
+                            const yearText = (_f = valueEl.textContent) === null || _f === void 0 ? void 0 : _f.trim().split('/')[0];
+                            if (yearText && /^\d{4}$/.test(yearText)) {
+                                publicationYear = parseInt(yearText, 10);
+                            }
+                        }
                     }
+                    if (venueName && publicationYear)
+                        break;
                 }
             }
-            return venueNameFromDetail || null;
         }
         catch (error) {
             console.error(`Error fetching or parsing ${publicationUrl}:`, error);
-            return null;
         }
+        return { venueName, publicationYear };
     });
 }
-function cleanTextForComparison(text) {
+function cleanTextForComparison(text, isGoogleScholarVenue = false) {
     if (!text)
         return "";
     let cleanedText = text.toLowerCase();
-    cleanedText = cleanedText.replace(/ & /g, " and ");
+    // Normalize "&" and "&" to " and "
     cleanedText = cleanedText.replace(/&/g, " and ");
+    cleanedText = cleanedText.replace(/&/g, " and ");
+    // Remove general punctuation (including parentheses now)
     cleanedText = cleanedText.replace(/[.,\/#!$%\^;\*:{}<>=\-_`~?"“()]/g, " ");
+    if (isGoogleScholarVenue) {
+        // For Google Scholar venue strings, try to remove leading years or edition numbers
+        // Matches: "2010 ", "9th ", "20th " at the beginning of the string
+        cleanedText = cleanedText.replace(/^(\d{4}\s+|\d{1,2}(st|nd|rd|th)\s+)/, "");
+    }
+    // Normalize multiple spaces to a single space and trim
     cleanedText = cleanedText.replace(/\s+/g, ' ');
     return cleanedText.trim();
 }
 function findRankForVenue(venueName, coreData) {
     const normalizedScholarVenueName = venueName.toLowerCase().trim();
-    if (!normalizedScholarVenueName)
+    // console.log(`--- Evaluating GS Venue: "${venueName}" (Normalized: "${normalizedScholarVenueName}") ---`);
+    if (!normalizedScholarVenueName) {
+        // console.log("GS Venue is empty, returning N/A.");
         return "N/A";
-    const specificExclusions = [
-        "sigcomm computer communication review",
-    ];
+    }
+    const specificExclusions = ["sigcomm computer communication review"];
     for (const exclusion of specificExclusions) {
         if (normalizedScholarVenueName.includes(exclusion)) {
+            // console.log(`SPECIFIC EXCLUSION: GS Venue "${venueName}" contains "${exclusion}". Assigning N/A.`);
             return "N/A";
         }
     }
     const extractedScholarAcronyms = extractPotentialAcronymsFromText(venueName);
     if (extractedScholarAcronyms.length > 0) {
+        // console.log(`ACRONYM_MATCH_ATTEMPT: Extracted GS Acronyms: [${extractedScholarAcronyms.join(', ')}] for GS Venue: "${venueName}"`);
         for (const scholarAcro of extractedScholarAcronyms) {
             for (const entry of coreData) {
                 if (entry.acronym) {
                     const coreAcro = entry.acronym.toLowerCase().trim();
                     if (coreAcro && coreAcro === scholarAcro) {
+                        // console.log(`!!! ACRONYM MATCH FOUND !!! GS Acro: "${scholarAcro}" matched CORE Acro: "${coreAcro}" (CORE Title: "${entry.title}", Rank: ${entry.rank})`);
                         return VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
                     }
                 }
             }
         }
+        // console.log(`ACRONYM_MATCH_ATTEMPT: No matching CORE acronym found.`);
     }
     else {
-        console.log(`ACRONYM_MATCH_ATTEMPT: No acronyms extracted for GS Venue: "${venueName}"`);
+        // console.log(`ACRONYM_MATCH_ATTEMPT: No acronyms extracted for GS Venue: "${venueName}"`);
     }
-    const gsCleanedForSubstring = cleanTextForComparison(normalizedScholarVenueName);
+    // Pass `true` for isGoogleScholarVenue when cleaning the GS string
+    const gsCleanedForSubstring = cleanTextForComparison(normalizedScholarVenueName, true);
+    // console.log(`FULL_NAME_MATCH_ATTEMPT: Starting for GS Venue: "${venueName}"`);
+    // console.log(`  GS Venue Cleaned for Substring Match: "${gsCleanedForSubstring}"`);
     let bestMatchRank = null;
     let longestMatchLength = 0;
-    let bestMatchingCoreTitleOriginal = ""; // To store the original CORE title of the best match
-    let bestMatchingCoreTitleProcessed = ""; // To store the processed CORE title of the best match
+    let bestMatchingCoreTitleOriginal = "";
+    // let bestMatchingCoreTitleProcessed = "";
+    // let bestMatchingCoreAcronym = "";
     const orgPrefixesToIgnore = [
-        "acm/ieee", "ieee/acm", // Combined first
-        "acm sigplan", "acm sigops", "acm sigbed", // More specific ACM SIGs
-        "acm", "ieee", "sigplan", "sigops", "sigbed", "usenix", "international" // General orgs/SIGs
+        "acm/ieee", "ieee/acm",
+        "acm sigplan", "acm sigops", "acm sigbed",
+        "acm", "ieee", "sigplan", "sigops", "sigbed", "usenix", "international"
     ];
     for (const entry of coreData) {
         if (entry.title) {
-            let coreTitleForMatch = cleanTextForComparison(entry.title);
-            const originalCoreTitleCleaned = coreTitleForMatch; // Save before stripping orgs
+            // Pass `false` (or omit) for CORE titles, we only want to strip org prefixes from them later.
+            let coreTitleForMatch = cleanTextForComparison(entry.title, false);
+            // const originalCoreTitleCleaned = coreTitleForMatch;
             let strippedSomething;
+            // let logStripping = (entry.acronym === "LCTES" || entry.title.toLowerCase().includes("data centric engineering"));
+            // if(logStripping) console.log(`  STRIP_DEBUG_CORE_ENTRY: Title: "${entry.title}", Acro: "${entry.acronym}", Initial clean: "${coreTitleForMatch}"`);
             do {
                 strippedSomething = false;
                 for (const prefix of orgPrefixesToIgnore) {
                     if (coreTitleForMatch.startsWith(prefix + " ") || coreTitleForMatch === prefix) {
+                        // const oldCoreTitle = coreTitleForMatch;
                         coreTitleForMatch = coreTitleForMatch.substring(prefix.length).trim();
+                        // if(logStripping) console.log(`    Stripped "${prefix}" -> "${coreTitleForMatch}" (from "${oldCoreTitle}")`);
                         strippedSomething = true;
                     }
                 }
             } while (strippedSomething && coreTitleForMatch.length > 0);
             coreTitleForMatch = coreTitleForMatch.trim();
+            // if(logStripping && originalCoreTitleCleaned !== coreTitleForMatch) console.log(`    Final after stripping: "${coreTitleForMatch}"`);
             if (gsCleanedForSubstring && coreTitleForMatch && coreTitleForMatch.length > 5) {
                 if (gsCleanedForSubstring.includes(coreTitleForMatch)) {
-                    // console.log(`    POTENTIAL Full name substring match: CORE (org-stripped) "${coreTitleForMatch}" in GS "${gsCleanedForSubstring}" (Rank: ${entry.rank})`);
+                    // console.log(`    POTENTIAL Full name substring match: GS Cleaned: "${gsCleanedForSubstring}", CORE Original: "${entry.title}", CORE Stripped: "${coreTitleForMatch}", Rank: ${entry.rank}`);
                     if (coreTitleForMatch.length > longestMatchLength) {
                         longestMatchLength = coreTitleForMatch.length;
                         bestMatchRank = VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
                         bestMatchingCoreTitleOriginal = entry.title;
-                        bestMatchingCoreTitleProcessed = coreTitleForMatch;
-                        // console.log(`      NEW BEST Substring Match: Length ${longestMatchLength}, Rank ${bestMatchRank}, CORE Title: "${entry.title}"`);
+                        // bestMatchingCoreTitleProcessed = coreTitleForMatch;
+                        // bestMatchingCoreAcronym = entry.acronym;
+                        // console.log(`      ==> NEW BEST Substring Match: Length ${longestMatchLength}, Rank ${bestMatchRank}, CORE Title: "${entry.title}", CORE Acro: "${entry.acronym}"`);
                     }
                 }
             }
         }
     }
     if (bestMatchRank !== null) {
+        // console.log(`!!! BEST FULL NAME SUBSTRING MATCH CHOSEN for GS Venue: "${venueName}" !!!`);
+        // console.log(`  Matched with CORE Title: "${bestMatchingCoreTitleOriginal}" (Acro: ${bestMatchingCoreAcronym})`);
+        // console.log(`  (Processed CORE Title for match: "${bestMatchingCoreTitleProcessed}")`);
+        // console.log(`  (GS Venue processed for match: "${gsCleanedForSubstring}")`);
+        // console.log(`  Longest matched part length: ${longestMatchLength}, Assigned Rank: ${bestMatchRank}`);
         return bestMatchRank;
     }
-    console.log(`--- NO MATCH FOUND for GS Venue: "${venueName}" (GS Cleaned: "${gsCleanedForSubstring}", GS Acronyms: [${extractedScholarAcronyms.join(', ')}]) ---`);
+    // console.log(`--- NO MATCH FOUND for GS Venue: "${venueName}" (GS Cleaned: "${gsCleanedForSubstring}", GS Acronyms: [${extractedScholarAcronyms.join(', ')}]) ---`);
     return "N/A";
 }
 function extractPotentialAcronymsFromText(scholarVenueName) {
     const acronyms = new Set();
-    const originalVenueName = scholarVenueName; // Keep original for case-sensitive extraction logic
-    // --- Heuristic 1: Content within Parentheses ---
+    const originalVenueName = scholarVenueName;
     const parentheticalMatches = originalVenueName.match(/\(([^)]+)\)/g);
     if (parentheticalMatches) {
         parentheticalMatches.forEach(match => {
@@ -286,45 +359,28 @@ function extractPotentialAcronymsFromText(scholarVenueName) {
                 });
             }
             else {
-                if (contentInParen.length >= 2 && contentInParen.length <= 12 &&
-                    /^[A-Za-z0-9]+$/.test(contentInParen) &&
-                    !contentInParen.includes(" ") && !contentInParen.includes("-") &&
-                    !/^\d+$/.test(contentInParen) &&
-                    contentInParen.toLowerCase() !== "was" && contentInParen.toLowerCase() !== "formerly") {
+                if (contentInParen.length >= 2 && contentInParen.length <= 12 && /^[A-Za-z0-9]+$/.test(contentInParen) && !contentInParen.includes(" ") && !contentInParen.includes("-") && !/^\d+$/.test(contentInParen) && contentInParen.toLowerCase() !== "was" && contentInParen.toLowerCase() !== "formerly") {
                     acronyms.add(contentInParen.toLowerCase());
                 }
             }
         });
     }
-    // --- Heuristic 2: Standalone Acronym-Like Words (Revised) ---
     let textWithoutParens = originalVenueName.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
-    // Further clean common prefixes that are not acronyms themselves
     textWithoutParens = textWithoutParens.replace(/\b(Proceedings\s+of\s+the|Proc\.\s+of\s+the|International\s+Conference\s+on|Intl\.\s+Conf\.\s+on|Conference\s+on|Symposium\s+on|Workshop\s+on|Journal\s+of)\b/gi, ' ').trim();
     const words = textWithoutParens.split(/[\s\-‑\/.,:;&]+/);
-    const commonNonAcronyms = new Set([
-        'proc', 'data', 'services', 'models', 'security', 'time', 'proceedings', 'journal', 'conference', 'conf', 'symposium', 'symp', 'workshop', 'ws', 'international', 'intl', 'natl', 'national', 'annual', 'acm', 'ieee', 'usenix', 'sig', 'vol', 'volume', 'no', 'number', 'pp', 'page', 'pages', 'part', 'edition', 'of', 'the', 'on', 'in', 'and', 'for', 'to', 'at', 'st', 'nd', 'rd', 'th', 'springer', 'elsevier', 'wiley', 'press', 'extended', 'abstract', 'abstracts', 'poster', 'session', 'sessions', 'doctoral', 'companion', 'joint', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'advances', 'systems', 'networks', 'computing', 'applications', 'technology', 'technologies', 'research', 'science', 'sciences', 'engineering', 'management', 'information', 'communication', 'communications', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 'transactions', 'letters', 'advances', 'bulletin', 'archive', 'archives', 'series', 'chapter', 'section', 'tutorial', 'tutorials', 'report', 'technical', 'tech', ...(Array.from({ length: 75 }, (_, i) => (1970 + i).toString())) // Extended year range
-    ]);
+    const commonNonAcronyms = new Set(['proc', 'data', 'services', 'models', 'security', 'time', 'proceedings', 'journal', 'conference', 'conf', 'symposium', 'symp', 'workshop', 'ws', 'international', 'intl', 'natl', 'national', 'annual', 'vol', 'volume', 'no', 'number', 'pp', 'page', 'pages', 'part', 'edition', 'of', 'the', 'on', 'in', 'and', 'for', 'to', 'at', 'st', 'nd', 'rd', 'th', 'springer', 'elsevier', 'wiley', 'press', 'extended', 'abstract', 'abstracts', 'poster', 'session', 'sessions', 'doctoral', 'companion', 'joint', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'advances', 'systems', 'networks', 'computing', 'applications', 'technology', 'technologies', 'research', 'science', 'sciences', 'engineering', 'management', 'information', 'communication', 'communications', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 'transactions', 'letters', 'advances', 'bulletin', 'archive', 'archives', 'series', 'chapter', 'section', 'tutorial', 'tutorials', 'report', 'technical', 'tech', ...(Array.from({ length: 75 }, (_, i) => (1970 + i).toString()))]);
     words.forEach(word => {
         const cleanWordOriginalCase = word.trim();
         if (cleanWordOriginalCase.length >= 2 && cleanWordOriginalCase.length <= 12 && !/^\d+$/.test(cleanWordOriginalCase)) {
-            if ((!commonNonAcronyms.has(cleanWordOriginalCase.toLowerCase())) &&
-                (/^[A-Z0-9]+$/.test(cleanWordOriginalCase) || // ALL CAPS (and numbers)
-                    /^[A-Z][a-z]+[A-Z]+[A-Za-z0-9]*$/.test(cleanWordOriginalCase) // Cap->lowers->Caps->(optional more) e.g. SenSys, AsiaCCS
-                )) {
+            if ((!commonNonAcronyms.has(cleanWordOriginalCase.toLowerCase())) && (/^[A-Z0-9]+$/.test(cleanWordOriginalCase) || /^[A-Z][a-z]+[A-Z]+[A-Za-z0-9]*$/.test(cleanWordOriginalCase))) {
                 acronyms.add(cleanWordOriginalCase.toLowerCase());
             }
         }
     });
-    if (acronyms.size === 0 &&
-        originalVenueName.length >= 2 && originalVenueName.length <= 10 &&
-        !originalVenueName.includes(" ") && // Typically single word if it's the whole name and an acronym
-        /^[A-Za-z0-9]+$/.test(originalVenueName) && // Alphanumeric
-        !/^\d+$/.test(originalVenueName) &&
-        !commonNonAcronyms.has(originalVenueName.toLowerCase())) {
+    if (acronyms.size === 0 && originalVenueName.length >= 2 && originalVenueName.length <= 10 && !originalVenueName.includes(" ") && /^[A-Za-z0-9]+$/.test(originalVenueName) && !/^\d+$/.test(originalVenueName) && !commonNonAcronyms.has(originalVenueName.toLowerCase())) {
         acronyms.add(originalVenueName.toLowerCase());
     }
-    const resultAcronyms = Array.from(acronyms);
-    return resultAcronyms;
+    return Array.from(acronyms);
 }
 function displayRankBadgeAfterTitle(rowElement, rank) {
     const titleCell = rowElement.querySelector('td.gsc_a_t');
@@ -332,13 +388,11 @@ function displayRankBadgeAfterTitle(rowElement, rank) {
         const oldBadge = titleCell.querySelector('span.gsr-rank-badge-inline');
         oldBadge === null || oldBadge === void 0 ? void 0 : oldBadge.remove();
     }
-    if (!VALID_RANKS.includes(rank)) {
+    if (!VALID_RANKS.includes(rank))
         return;
-    }
     const titleLinkElement = rowElement.querySelector('td.gsc_a_t a.gsc_a_at');
-    if (!titleLinkElement) {
+    if (!titleLinkElement)
         return;
-    }
     const badge = document.createElement('span');
     badge.classList.add('gsr-rank-badge-inline');
     badge.textContent = rank;
@@ -450,7 +504,7 @@ function displaySummaryPanel(rankCounts) {
     var _a, _b;
     const existingStatusElement = document.getElementById(STATUS_ELEMENT_ID);
     const parentOfStatus = existingStatusElement === null || existingStatusElement === void 0 ? void 0 : existingStatusElement.parentNode;
-    (_a = document.getElementById(SUMMARY_PANEL_ID)) === null || _a === void 0 ? void 0 : _a.remove(); // Remove old summary if any
+    (_a = document.getElementById(SUMMARY_PANEL_ID)) === null || _a === void 0 ? void 0 : _a.remove();
     const panel = document.createElement('div');
     panel.id = SUMMARY_PANEL_ID;
     panel.classList.add('gsc_rsb_s', 'gsc_prf_pnl');
@@ -479,25 +533,20 @@ function displaySummaryPanel(rankCounts) {
     betaLabel.style.borderRadius = '10px';
     betaLabel.style.verticalAlign = 'middle';
     betaLabel.style.cursor = 'help';
-    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\n" +
-        "It is free and open source.\n" +
-        "We are currently using CORE2023 rankings only.\n" +
-        "Help us spot inconsistencies!\n" +
-        "For any issues, please click on “Report Bug”.");
+    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\nIt is free and open source.\nWe are currently using CORE2023 rankings only.\nHelp us spot inconsistencies!\nFor any issues, please click on “Report Bug”.");
     headerDiv.appendChild(betaLabel);
     const reportBugLink = document.createElement('a');
     reportBugLink.href = "https://forms.office.com/r/PbSzWaQmpJ";
     reportBugLink.target = "_blank";
-    reportBugLink.style.marginLeft = '10px'; // Increased margin a bit as question mark is gone
+    reportBugLink.style.marginLeft = '10px';
     reportBugLink.style.textDecoration = 'none';
-    reportBugLink.style.color = '#D32F2F'; // Red color for the link
-    reportBugLink.style.fontSize = '0.75em'; // Reduced font size
-    reportBugLink.style.fontWeight = 'normal'; // Normal weight, or '500' for slightly bolder
+    reportBugLink.style.color = '#D32F2F';
+    reportBugLink.style.fontSize = '0.75em';
+    reportBugLink.style.fontWeight = 'normal';
     reportBugLink.style.verticalAlign = 'middle';
     reportBugLink.textContent = 'Report Bug';
     reportBugLink.setAttribute('title', 'Report a bug or inconsistency (opens new tab)');
     headerDiv.appendChild(reportBugLink);
-    // --- END: Header ---
     let content = headerDiv.outerHTML;
     content += '<ul style="list-style: none; padding: 0; margin:0; margin-top: 8px;">';
     for (const rank of ["A*", "A", "B", "C", "N/A"]) {
@@ -539,9 +588,7 @@ function displaySummaryPanel(rankCounts) {
         else {
             rankDisplay = `<span style="display:inline-block; width: 30px; font-weight:bold; margin-right: 8px;">${rank}:</span>`;
         }
-        content += `<li style="font-size:13px; margin-bottom: 5px; display: flex; align-items: center;">
-                      ${rankDisplay}
-                      <span style="margin-left: ${VALID_RANKS.includes(rank) ? '0' : '5px'};">${count} papers</span></li>`;
+        content += `<li style="font-size:13px; margin-bottom: 5px; display: flex; align-items: center;">${rankDisplay}<span style="margin-left: ${VALID_RANKS.includes(rank) ? '0' : '5px'};">${count} papers</span></li>`;
     }
     panel.innerHTML = content + '</ul>';
     if (parentOfStatus && existingStatusElement) {
@@ -578,28 +625,23 @@ function main() {
     return __awaiter(this, void 0, void 0, function* () {
         console.log("Google Scholar Ranker: main() started.");
         const statusElement = createStatusElement("Initializing Scholar Ranker...");
-        const coreData = yield loadCoreData();
-        if (!coreData || coreData.length === 0) {
-            const statusText = statusElement.querySelector('.gsr-status-text');
-            if (statusText)
-                statusText.textContent = "Error loading CORE data. Check console.";
-            const progressBarInner = statusElement.querySelector('.gsr-progress-bar-inner');
-            if (progressBarInner)
-                progressBarInner.style.backgroundColor = 'red';
-            return;
-        }
-        console.log(`Loaded ${coreData.length} CORE entries.`);
         statusElement.querySelector('.gsr-status-text').textContent = "Expanding publications...";
-        yield expandAllPublications(statusElement);
+        yield expandAllPublications(statusElement); // Function definition needs to be present
         const publicationLinkElements = [];
         document.querySelectorAll('tr.gsc_a_tr').forEach(row => {
             var _a;
             const linkEl = row.querySelector('td.gsc_a_t a.gsc_a_at');
+            const yearEl = row.querySelector('td.gsc_a_y span.gsc_a_h');
+            let yearFromProfile = null;
+            if ((yearEl === null || yearEl === void 0 ? void 0 : yearEl.textContent) && /^\d{4}$/.test(yearEl.textContent.trim())) {
+                yearFromProfile = parseInt(yearEl.textContent.trim(), 10);
+            }
             if (linkEl instanceof HTMLAnchorElement && linkEl.href) {
                 publicationLinkElements.push({
                     url: linkEl.href,
                     rowElement: row,
-                    titleText: ((_a = linkEl.textContent) === null || _a === void 0 ? void 0 : _a.toLowerCase()) || ""
+                    titleText: ((_a = linkEl.textContent) === null || _a === void 0 ? void 0 : _a.toLowerCase()) || "",
+                    yearFromProfile: yearFromProfile
                 });
             }
         });
@@ -611,10 +653,11 @@ function main() {
         updateStatusElement(statusElement, 0, publicationLinkElements.length);
         const rankCounts = { "A*": 0, "A": 0, "B": 0, "C": 0, "N/A": 0 };
         let processedCount = 0;
-        const CONCURRENCY_LIMIT = 6;
+        const CONCURRENCY_LIMIT = 5;
         const processPublication = (pubInfo) => __awaiter(this, void 0, void 0, function* () {
             try {
-                const venueName = yield fetchAndExtractVenueName(pubInfo.url);
+                const { venueName, publicationYear: yearFromDetail } = yield fetchVenueAndYear(pubInfo.url);
+                const effectiveYear = yearFromDetail !== null ? yearFromDetail : pubInfo.yearFromProfile;
                 let currentRank = "N/A";
                 let ignoreFound = false;
                 for (const keyword of IGNORE_KEYWORDS) {
@@ -634,7 +677,19 @@ function main() {
                         }
                     }
                     if (!ignoreFound) {
-                        currentRank = findRankForVenue(venueName, coreData);
+                        const coreDataFile = getCoreDataFileForYear(effectiveYear);
+                        if (coreDataFile) {
+                            const yearSpecificCoreData = yield loadCoreDataForFile(coreDataFile);
+                            if (yearSpecificCoreData.length > 0) {
+                                currentRank = findRankForVenue(venueName, yearSpecificCoreData);
+                            }
+                            else {
+                                console.warn(`No CORE data loaded or available for file: ${coreDataFile} (Year: ${effectiveYear})`);
+                            }
+                        }
+                        else {
+                            console.warn(`No CORE data file determined for publication year: ${effectiveYear}`);
+                        }
                     }
                 }
                 else if (!(venueName === null || venueName === void 0 ? void 0 : venueName.trim()) && !ignoreFound) {
@@ -644,7 +699,7 @@ function main() {
             }
             catch (error) {
                 console.warn(`Error processing publication ${pubInfo.url}:`, error);
-                return { rank: "N/A", rowElement: pubInfo.rowElement, error: error };
+                return { rank: "N/A", rowElement: pubInfo.rowElement };
             }
         });
         for (let i = 0; i < publicationLinkElements.length; i += CONCURRENCY_LIMIT) {

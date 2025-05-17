@@ -17,11 +17,11 @@ Google Scholar is great at collecting publications but **terrible at showing th
 
 ## Features
 
-|                           |                                               |
-| ------------------------- | --------------------------------------------- |
-| 🎯 **Automatic matching** | Apply multiple heuristics for matching     |
-| 🏷 **Rank badges**        | A\*, A, B, C colour‑coded inline              |
-| 📊 **Summary panel**      | Totals for A\*, A, B, C papers on the profile |
+| Feature                   | Description                                                                                                                               |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 🎯 **Historical Matching** | Selects the appropriate CORE ranking list (2023, 2021, 2020, 2018, 2017, 2014) based on the publication's year. Applies multiple heuristics for matching. |
+| 🏷 **Rank badges**        | A\*, A, B, C colour‑coded inline next to each paper title, reflecting the historical rank.                                                |
+| 📊 **Summary panel**      | Totals for A\*, A, B, C, N/A papers on the profile, aggregated across all processed publications.                                         |
 
 
 ## Quick Install
@@ -51,7 +51,7 @@ Google Scholar is great at collecting publications but **terrible at showing th
 
 ## Data Source and Acknowledgements
 
-This extension currently uses the [**CORE 2023 Conference Rankings**](http://portal.core.edu.au/conf-ranks/) courtesy of [**Australasian Computing Research and Education (CORE)**](https://www.linkedin.com/company/australasian-computing-research-and-education-core/).
+This extension uses historical **CORE Conference Rankings** from the years **2023, 2021, 2020, 2018, 2017, and 2014**, courtesy of [**Australasian Computing Research and Education (CORE)**](https://www.linkedin.com/company/australasian-computing-research-and-education-core/). Please refer to the official [CORE portal](http://portal.core.edu.au/conf-ranks/) for the most authoritative data.
 
 ## Contributing & Bug Reports (BETA)
 
