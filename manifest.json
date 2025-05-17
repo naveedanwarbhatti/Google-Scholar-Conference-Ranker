@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Google Scholar Conference Ranker",
-  "description": "Classifies conferences on Google Scholar profiles using CORE2023 rankings and shows a summary panel. (c) Naveed Anwar Bhatti",
+  "description": "Classifies conferences on Google Scholar profiles using CORE current and historic rankings and shows a summary panel.",
   "version": "0.1.5", 
   "content_scripts": [
     {
