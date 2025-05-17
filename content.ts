@@ -456,9 +456,15 @@ function displaySummaryPanel(rankCounts: Record<string, number>) {
     const existingStatusElement = document.getElementById(STATUS_ELEMENT_ID);
     const parentOfStatus = existingStatusElement?.parentNode;
     document.getElementById(SUMMARY_PANEL_ID)?.remove();
-    const panel = document.createElement('div'); panel.id = SUMMARY_PANEL_ID;
-    panel.classList.add('gsc_rsb_s', 'gsc_prf_pnl'); panel.style.padding = '10px'; panel.style.marginBottom = '15px';
-    const headerDiv = document.createElement('div'); headerDiv.style.display = 'flex'; headerDiv.style.alignItems = 'center';
+
+    const panel = document.createElement('div');
+    panel.id = SUMMARY_PANEL_ID;
+    panel.classList.add('gsc_rsb_s', 'gsc_prf_pnl');
+    panel.style.padding = '10px';
+    panel.style.marginBottom = '15px';
+
+    const headerDiv = document.createElement('div');
+    headerDiv.style.display = 'flex'; headerDiv.style.alignItems = 'center';
     headerDiv.style.fontSize = '14px'; headerDiv.style.fontWeight = 'bold'; headerDiv.style.color = '#777';
     headerDiv.style.marginBottom = '10px'; headerDiv.style.paddingBottom = '5px'; headerDiv.style.borderBottom = '1px solid #e0e0e0';
     const summaryTitle = document.createElement('span'); summaryTitle.textContent = 'CORE Rank Summary'; headerDiv.appendChild(summaryTitle);
@@ -466,38 +472,112 @@ function displaySummaryPanel(rankCounts: Record<string, number>) {
     betaLabel.style.marginLeft = '8px'; betaLabel.style.padding = '1px 6px'; betaLabel.style.fontSize = '0.75em';
     betaLabel.style.fontWeight = '600'; betaLabel.style.color = '#fff'; betaLabel.style.backgroundColor = '#6c757d';
     betaLabel.style.borderRadius = '10px'; betaLabel.style.verticalAlign = 'middle'; betaLabel.style.cursor = 'help';
-    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\nIt is free and open source.\nWe are currently using CORE2023 rankings only.\nHelp us spot inconsistencies!\nFor any issues, please click on “Report Bug”.");
+    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\nIt is free and open source.\nIt uses historical CORE rankings (2014-2023) based on publication year.\nHelp us spot inconsistencies!\nFor any issues, please click on “Report Bug”.");
     headerDiv.appendChild(betaLabel);
     const reportBugLink = document.createElement('a'); reportBugLink.href = "https://forms.office.com/r/PbSzWaQmpJ"; reportBugLink.target = "_blank";
     reportBugLink.style.marginLeft = '10px'; reportBugLink.style.textDecoration = 'none'; reportBugLink.style.color = '#D32F2F';
     reportBugLink.style.fontSize = '0.75em'; reportBugLink.style.fontWeight = 'normal'; reportBugLink.style.verticalAlign = 'middle';
     reportBugLink.textContent = 'Report Bug'; reportBugLink.setAttribute('title', 'Report a bug or inconsistency (opens new tab)');
     headerDiv.appendChild(reportBugLink);
-    let content = headerDiv.outerHTML;
-    content += '<ul style="list-style: none; padding: 0; margin:0; margin-top: 8px;">';
+
+    panel.appendChild(headerDiv); // Append header first
+
+    const list = document.createElement('ul');
+    list.style.listStyle = 'none'; list.style.padding = '0'; list.style.margin = '8px 0 0 0';
+
+    // --- Logic for Horizontal Bar Chart ---
+    const ranksForChart = ["A*", "A", "B", "C"];
+    let maxCountForScale = 10; // Default max scale
+    ranksForChart.forEach(rank => {
+        if ((rankCounts[rank] || 0) > maxCountForScale) {
+            maxCountForScale = rankCounts[rank] || 0;
+        }
+    });
+    // If all counts are low, ensure scale is at least 10, or a bit more than max if max is small
+    if (maxCountForScale < 10) maxCountForScale = 10;
+    else if (maxCountForScale > 10 && maxCountForScale < 15) maxCountForScale = Math.ceil(maxCountForScale / 5) * 5; // round up to next 5 if slightly over 10
+
+
+    const barChartColor = '#76C7C0'; // Single color for all bars (same as progress bar)
+    const barHeight = '18px'; // Height of each bar row
+
     for (const rank of ["A*", "A", "B", "C", "N/A"]) {
-        const count = rankCounts[rank] || 0; let rankDisplay = rank;
+        const count = rankCounts[rank] || 0;
+        const listItem = document.createElement('li');
+        listItem.style.fontSize = '13px';
+        listItem.style.marginBottom = '6px'; // Increased margin for bars
+        listItem.style.display = 'flex';
+        listItem.style.alignItems = 'center';
+
+        // Rank Badge/Label
+        const rankLabelSpan = document.createElement('span');
+        rankLabelSpan.style.display = 'inline-block';
+        rankLabelSpan.style.fontWeight = 'bold';
+        rankLabelSpan.style.marginRight = '8px';
+        rankLabelSpan.style.width = '35px'; // Fixed width for rank labels (A*, A, B, C, N/A:)
+
         if (VALID_RANKS.includes(rank)) {
-            const badgeSpan = document.createElement('span'); badgeSpan.textContent = rank;
-            badgeSpan.style.display = 'inline-block'; badgeSpan.style.padding = '0px 4px'; badgeSpan.style.marginRight = '8px';
-            badgeSpan.style.fontSize = '0.9em'; badgeSpan.style.fontWeight = 'bold'; badgeSpan.style.color = '#000000';
-            badgeSpan.style.border = '1px solid #ccc'; badgeSpan.style.borderRadius = '3px'; badgeSpan.style.minWidth = '25px'; badgeSpan.style.textAlign = 'center';
+            rankLabelSpan.textContent = rank;
+            rankLabelSpan.style.padding = '1px 4px'; // Adjusted padding
+            rankLabelSpan.style.fontSize = '0.9em';
+            rankLabelSpan.style.color = '#000000';
+            rankLabelSpan.style.border = '1px solid #ccc';
+            rankLabelSpan.style.borderRadius = '3px';
+            rankLabelSpan.style.textAlign = 'center';
+            // Apply background colors to rank badges
             switch (rank) {
-                case "A*": badgeSpan.style.backgroundColor = '#FFD700'; badgeSpan.style.borderColor = '#B8860B'; break;
-                case "A":  badgeSpan.style.backgroundColor = '#90EE90'; badgeSpan.style.borderColor = '#3CB371'; break;
-                case "B":  badgeSpan.style.backgroundColor = '#ADFF2F'; badgeSpan.style.borderColor = '#7FFF00'; break;
-                case "C":  badgeSpan.style.backgroundColor = '#FFA07A'; badgeSpan.style.borderColor = '#FA8072'; break;
+                case "A*": rankLabelSpan.style.backgroundColor = '#FFD700'; rankLabelSpan.style.borderColor = '#B8860B'; break;
+                case "A":  rankLabelSpan.style.backgroundColor = '#90EE90'; rankLabelSpan.style.borderColor = '#3CB371'; break;
+                case "B":  rankLabelSpan.style.backgroundColor = '#ADFF2F'; rankLabelSpan.style.borderColor = '#7FFF00'; break;
+                case "C":  rankLabelSpan.style.backgroundColor = '#FFA07A'; rankLabelSpan.style.borderColor = '#FA8072'; break;
             }
-            rankDisplay = badgeSpan.outerHTML;
-        } else { rankDisplay = `<span style="display:inline-block; width: 30px; font-weight:bold; margin-right: 8px;">${rank}:</span>`; }
-        content += `<li style="font-size:13px; margin-bottom: 5px; display: flex; align-items: center;">${rankDisplay}<span style="margin-left: ${VALID_RANKS.includes(rank) ? '0' : '5px'};">${count} papers</span></li>`;
+        } else { // For N/A
+            rankLabelSpan.textContent = `${rank}:`;
+            rankLabelSpan.style.width = 'auto'; // Let N/A: take its natural width
+        }
+        listItem.appendChild(rankLabelSpan);
+
+        // Horizontal Bar (only for A*, A, B, C)
+        if (VALID_RANKS.includes(rank)) {
+            const barContainer = document.createElement('div');
+            barContainer.style.flexGrow = '1';
+            barContainer.style.backgroundColor = '#f0f0f0'; // Light grey background for the bar track
+            barContainer.style.height = barHeight;
+            barContainer.style.borderRadius = '2px';
+            barContainer.style.marginRight = '8px';
+            barContainer.style.position = 'relative'; // For text overlay if needed
+
+            const barFill = document.createElement('div');
+            const percentageWidth = maxCountForScale > 0 ? (count / maxCountForScale) * 100 : 0;
+            barFill.style.width = `${Math.min(percentageWidth, 100)}%`; // Cap at 100%
+            barFill.style.height = '100%';
+            barFill.style.backgroundColor = barChartColor;
+            barFill.style.borderRadius = '2px';
+            barFill.style.transition = 'width 0.5s ease-out';
+            barContainer.appendChild(barFill);
+            listItem.appendChild(barContainer);
+        }
+
+        // Count Text
+        const countTextSpan = document.createElement('span');
+        countTextSpan.textContent = `${count} paper${count === 1 ? '' : 's'}`;
+        countTextSpan.style.minWidth = '55px'; // Ensure space for "XX papers"
+        countTextSpan.style.textAlign = 'right';
+        listItem.appendChild(countTextSpan);
+
+        list.appendChild(listItem);
     }
-    panel.innerHTML = content + '</ul>';
-    if (parentOfStatus && existingStatusElement) { parentOfStatus.replaceChild(panel, existingStatusElement); }
-    else {
-        const gsBdy = document.getElementById('gs_bdy'); const rightSidebarContainer = gsBdy?.querySelector('div.gsc_rsb');
+    panel.appendChild(list);
+
+    // Injection logic (same as before)
+    if (parentOfStatus && existingStatusElement) {
+        parentOfStatus.replaceChild(panel, existingStatusElement);
+    } else {
+        const gsBdy = document.getElementById('gs_bdy');
+        const rightSidebarContainer = gsBdy?.querySelector('div.gsc_rsb');
         if (rightSidebarContainer) {
-            const publicAccessElement = rightSidebarContainer.querySelector('#gsc_rsb_mnd'); const coauthorsElement = rightSidebarContainer.querySelector('#gsc_rsb_co');
+            const publicAccessElement = rightSidebarContainer.querySelector('#gsc_rsb_mnd');
+            const coauthorsElement = rightSidebarContainer.querySelector('#gsc_rsb_co');
             const citedByElement = rightSidebarContainer.querySelector('#gsc_rsb_cit');
             if (publicAccessElement) rightSidebarContainer.insertBefore(panel, publicAccessElement);
             else if (coauthorsElement) rightSidebarContainer.insertBefore(panel, coauthorsElement);
@@ -506,7 +586,8 @@ function displaySummaryPanel(rankCounts: Record<string, number>) {
             else rightSidebarContainer.prepend(panel);
         } else {
             const profileTableContainer = document.getElementById('gsc_a_c');
-            if (profileTableContainer) profileTableContainer.before(panel); else document.body.prepend(panel);
+            if (profileTableContainer) profileTableContainer.before(panel);
+            else document.body.prepend(panel);
         }
     }
 }
