@@ -533,7 +533,7 @@ function displaySummaryPanel(rankCounts) {
     betaLabel.style.borderRadius = '10px';
     betaLabel.style.verticalAlign = 'middle';
     betaLabel.style.cursor = 'help';
-    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\nIt is free and open source.\nWe are currently using CORE2023 rankings only.\nHelp us spot inconsistencies!\nFor any issues, please click on “Report Bug”.");
+    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\nIt is free and open source.\nIt uses historical CORE rankings (2014-2023) based on publication year.\nHelp us spot inconsistencies!\nFor any issues, please click on “Report Bug”.");
     headerDiv.appendChild(betaLabel);
     const reportBugLink = document.createElement('a');
     reportBugLink.href = "https://forms.office.com/r/PbSzWaQmpJ";
@@ -547,50 +547,101 @@ function displaySummaryPanel(rankCounts) {
     reportBugLink.textContent = 'Report Bug';
     reportBugLink.setAttribute('title', 'Report a bug or inconsistency (opens new tab)');
     headerDiv.appendChild(reportBugLink);
-    let content = headerDiv.outerHTML;
-    content += '<ul style="list-style: none; padding: 0; margin:0; margin-top: 8px;">';
+    panel.appendChild(headerDiv); // Append header first
+    const list = document.createElement('ul');
+    list.style.listStyle = 'none';
+    list.style.padding = '0';
+    list.style.margin = '8px 0 0 0';
+    // --- Logic for Horizontal Bar Chart ---
+    const ranksForChart = ["A*", "A", "B", "C"];
+    let maxCountForScale = 10; // Default max scale
+    ranksForChart.forEach(rank => {
+        if ((rankCounts[rank] || 0) > maxCountForScale) {
+            maxCountForScale = rankCounts[rank] || 0;
+        }
+    });
+    // If all counts are low, ensure scale is at least 10, or a bit more than max if max is small
+    if (maxCountForScale < 10)
+        maxCountForScale = 10;
+    else if (maxCountForScale > 10 && maxCountForScale < 15)
+        maxCountForScale = Math.ceil(maxCountForScale / 5) * 5; // round up to next 5 if slightly over 10
+    const barChartColor = '#76C7C0'; // Single color for all bars (same as progress bar)
+    const barHeight = '18px'; // Height of each bar row
     for (const rank of ["A*", "A", "B", "C", "N/A"]) {
         const count = rankCounts[rank] || 0;
-        let rankDisplay = rank;
+        const listItem = document.createElement('li');
+        listItem.style.fontSize = '13px';
+        listItem.style.marginBottom = '6px'; // Increased margin for bars
+        listItem.style.display = 'flex';
+        listItem.style.alignItems = 'center';
+        // Rank Badge/Label
+        const rankLabelSpan = document.createElement('span');
+        rankLabelSpan.style.display = 'inline-block';
+        rankLabelSpan.style.fontWeight = 'bold';
+        rankLabelSpan.style.marginRight = '8px';
+        rankLabelSpan.style.width = '35px'; // Fixed width for rank labels (A*, A, B, C, N/A:)
         if (VALID_RANKS.includes(rank)) {
-            const badgeSpan = document.createElement('span');
-            badgeSpan.textContent = rank;
-            badgeSpan.style.display = 'inline-block';
-            badgeSpan.style.padding = '0px 4px';
-            badgeSpan.style.marginRight = '8px';
-            badgeSpan.style.fontSize = '0.9em';
-            badgeSpan.style.fontWeight = 'bold';
-            badgeSpan.style.color = '#000000';
-            badgeSpan.style.border = '1px solid #ccc';
-            badgeSpan.style.borderRadius = '3px';
-            badgeSpan.style.minWidth = '25px';
-            badgeSpan.style.textAlign = 'center';
+            rankLabelSpan.textContent = rank;
+            rankLabelSpan.style.padding = '1px 4px'; // Adjusted padding
+            rankLabelSpan.style.fontSize = '0.9em';
+            rankLabelSpan.style.color = '#000000';
+            rankLabelSpan.style.border = '1px solid #ccc';
+            rankLabelSpan.style.borderRadius = '3px';
+            rankLabelSpan.style.textAlign = 'center';
+            // Apply background colors to rank badges
             switch (rank) {
                 case "A*":
-                    badgeSpan.style.backgroundColor = '#FFD700';
-                    badgeSpan.style.borderColor = '#B8860B';
+                    rankLabelSpan.style.backgroundColor = '#FFD700';
+                    rankLabelSpan.style.borderColor = '#B8860B';
                     break;
                 case "A":
-                    badgeSpan.style.backgroundColor = '#90EE90';
-                    badgeSpan.style.borderColor = '#3CB371';
+                    rankLabelSpan.style.backgroundColor = '#90EE90';
+                    rankLabelSpan.style.borderColor = '#3CB371';
                     break;
                 case "B":
-                    badgeSpan.style.backgroundColor = '#ADFF2F';
-                    badgeSpan.style.borderColor = '#7FFF00';
+                    rankLabelSpan.style.backgroundColor = '#ADFF2F';
+                    rankLabelSpan.style.borderColor = '#7FFF00';
                     break;
                 case "C":
-                    badgeSpan.style.backgroundColor = '#FFA07A';
-                    badgeSpan.style.borderColor = '#FA8072';
+                    rankLabelSpan.style.backgroundColor = '#FFA07A';
+                    rankLabelSpan.style.borderColor = '#FA8072';
                     break;
             }
-            rankDisplay = badgeSpan.outerHTML;
         }
-        else {
-            rankDisplay = `<span style="display:inline-block; width: 30px; font-weight:bold; margin-right: 8px;">${rank}:</span>`;
+        else { // For N/A
+            rankLabelSpan.textContent = `${rank}:`;
+            rankLabelSpan.style.width = 'auto'; // Let N/A: take its natural width
         }
-        content += `<li style="font-size:13px; margin-bottom: 5px; display: flex; align-items: center;">${rankDisplay}<span style="margin-left: ${VALID_RANKS.includes(rank) ? '0' : '5px'};">${count} papers</span></li>`;
+        listItem.appendChild(rankLabelSpan);
+        // Horizontal Bar (only for A*, A, B, C)
+        if (VALID_RANKS.includes(rank)) {
+            const barContainer = document.createElement('div');
+            barContainer.style.flexGrow = '1';
+            barContainer.style.backgroundColor = '#f0f0f0'; // Light grey background for the bar track
+            barContainer.style.height = barHeight;
+            barContainer.style.borderRadius = '2px';
+            barContainer.style.marginRight = '8px';
+            barContainer.style.position = 'relative'; // For text overlay if needed
+            const barFill = document.createElement('div');
+            const percentageWidth = maxCountForScale > 0 ? (count / maxCountForScale) * 100 : 0;
+            barFill.style.width = `${Math.min(percentageWidth, 100)}%`; // Cap at 100%
+            barFill.style.height = '100%';
+            barFill.style.backgroundColor = barChartColor;
+            barFill.style.borderRadius = '2px';
+            barFill.style.transition = 'width 0.5s ease-out';
+            barContainer.appendChild(barFill);
+            listItem.appendChild(barContainer);
+        }
+        // Count Text
+        const countTextSpan = document.createElement('span');
+        countTextSpan.textContent = `${count} paper${count === 1 ? '' : 's'}`;
+        countTextSpan.style.minWidth = '55px'; // Ensure space for "XX papers"
+        countTextSpan.style.textAlign = 'right';
+        listItem.appendChild(countTextSpan);
+        list.appendChild(listItem);
     }
-    panel.innerHTML = content + '</ul>';
+    panel.appendChild(list);
+    // Injection logic (same as before)
     if (parentOfStatus && existingStatusElement) {
         parentOfStatus.replaceChild(panel, existingStatusElement);
     }
