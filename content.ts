@@ -301,28 +301,208 @@ function stripOrgPrefixes(text: string): string {
 }
 
 function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
-    const scholarVenueLower = venueName.toLowerCase().trim(); if (!scholarVenueLower) return "N/A";
-    const specificExclusions: string[] = ["sigcomm computer communication review"]; for (const exclusion of specificExclusions) { if (scholarVenueLower.includes(exclusion)) return "N/A"; }
+    const scholarVenueLower = venueName.toLowerCase().trim();
+    // DEBUG LOG 1: Initial venue name
+    console.log(`DEBUG_MATCH: --- Evaluating GS Venue: "${venueName}" (Normalized Lower: "${scholarVenueLower}") ---`);
+
+    if (!scholarVenueLower) {
+        // console.log("DEBUG_MATCH: GS Venue is empty, returning N/A.");
+        return "N/A";
+    }
+
+    const specificExclusions: string[] = ["sigcomm computer communication review"];
+    for (const exclusion of specificExclusions) {
+        if (scholarVenueLower.includes(exclusion)) {
+            // console.log(`DEBUG_MATCH: SPECIFIC EXCLUSION: GS Venue "${venueName}" contains "${exclusion}". Assigning N/A.`);
+            return "N/A";
+        }
+    }
+
     const extractedScholarAcronyms = extractPotentialAcronymsFromText(venueName);
-    if (extractedScholarAcronyms.length > 0) { for (const scholarAcro of extractedScholarAcronyms) { for (const entry of coreData) { if (entry.acronym) { const coreAcro = entry.acronym.toLowerCase().trim(); if (coreAcro && coreAcro === scholarAcro) return VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A"; } } } }
-    const gsCleanedForTitleMatch = cleanTextForComparison(scholarVenueLower, true); if (!gsCleanedForTitleMatch) return "N/A";
-    let bestSubstringMatchRank: string | null = null, longestMatchLength = 0;
-    for (const entry of coreData) { if (entry.title) { let coreTitleCleaned = cleanTextForComparison(entry.title, false); coreTitleCleaned = stripOrgPrefixes(coreTitleCleaned); if (gsCleanedForTitleMatch && coreTitleCleaned && coreTitleCleaned.length > 5) { if (gsCleanedForTitleMatch.includes(coreTitleCleaned)) { if (coreTitleCleaned.length > longestMatchLength) { longestMatchLength = coreTitleCleaned.length; bestSubstringMatchRank = VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A"; } } } } }
-    if (bestSubstringMatchRank !== null) return bestSubstringMatchRank;
-    let bestFuzzyScore = 0, bestFuzzyRank: string | null = null;
-    for (const entry of coreData) { if (!entry.title) continue; let coreTitleCleanedForFuzzy = cleanTextForComparison(entry.title, false); coreTitleCleanedForFuzzy = stripOrgPrefixes(coreTitleCleanedForFuzzy); if (coreTitleCleanedForFuzzy.length < 6 || gsCleanedForTitleMatch.length < 6) continue; const score = jaroWinkler(gsCleanedForTitleMatch, coreTitleCleanedForFuzzy); if (score >= FUZZY_THRESHOLD && score > bestFuzzyScore) { bestFuzzyScore = score; bestFuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A"; if (score === 1.0) break; } }
-    if (bestFuzzyRank !== null) return bestFuzzyRank;
+    // DEBUG LOG 2: Extracted acronyms
+    console.log(`DEBUG_MATCH: Extracted GS Acronyms: [${extractedScholarAcronyms.join(', ')}] for GS Venue: "${venueName}"`);
+
+    if (extractedScholarAcronyms.length > 0) {
+        for (const scholarAcro of extractedScholarAcronyms) {
+            for (const entry of coreData) {
+                if (entry.acronym) {
+                    const coreAcro = entry.acronym.toLowerCase().trim();
+                    // DEBUG LOG 3: Acronym comparison - Log more generally now
+                    // Conditional logging for specific cases can be re-added if console becomes too noisy
+                    console.log(`DEBUG_MATCH_ACRO_COMPARE: GS Acro: "${scholarAcro}" vs CORE Acro: "${coreAcro}" (CORE Title: "${entry.title}", Rank: ${entry.rank})`);
+                    if (coreAcro && coreAcro === scholarAcro) {
+                        // DEBUG LOG 4: Acronym match found
+                        console.log(`DEBUG_MATCH: !!! ACRONYM EXACT MATCH FOUND !!! GS Acro: "${scholarAcro}" to CORE Acro: "${coreAcro}". Rank: ${entry.rank}`);
+                        return VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
+                    }
+                }
+            }
+        }
+    } else {
+        // console.log(`DEBUG_MATCH: No acronyms extracted for GS Venue: "${venueName}"`);
+    }
+
+    const gsCleanedForTitleMatch = cleanTextForComparison(scholarVenueLower, true);
+    // DEBUG LOG 5: Cleaned GS venue for title matching
+    console.log(`DEBUG_MATCH: GS Venue Cleaned for Title Match: "${gsCleanedForTitleMatch}"`);
+
+    if (!gsCleanedForTitleMatch) {
+        // console.log("DEBUG_MATCH: GS Venue cleaned for title match is empty, returning N/A.");
+        return "N/A";
+    }
+
+    let bestSubstringMatchRank: string | null = null;
+    let longestMatchLength = 0;
+    // console.log(`DEBUG_MATCH: Starting Substring Match Attempt for GS Cleaned: "${gsCleanedForTitleMatch}"`);
+    for (const entry of coreData) {
+        if (entry.title) {
+            let coreTitleCleaned = cleanTextForComparison(entry.title, false);
+            coreTitleCleaned = stripOrgPrefixes(coreTitleCleaned);
+
+            // Log every comparison for substring check if needed, or conditionally
+            // if (scholarVenueLower.includes("mobiquitous")) {
+            //     console.log(`DEBUG_MATCH_SUBSTRING_CHECK: GS: "${gsCleanedForTitleMatch}" vs CORE Cleaned: "${coreTitleCleaned}" (Original CORE: "${entry.title}")`);
+            // }
+
+            if (gsCleanedForTitleMatch && coreTitleCleaned && coreTitleCleaned.length > 5) {
+                if (gsCleanedForTitleMatch.includes(coreTitleCleaned)) {
+                    // console.log(`DEBUG_MATCH: Potential Substring Match: CORE "${coreTitleCleaned}" in GS "${gsCleanedForTitleMatch}" (Rank: ${entry.rank})`);
+                    if (coreTitleCleaned.length > longestMatchLength) {
+                        longestMatchLength = coreTitleCleaned.length;
+                        bestSubstringMatchRank = VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
+                        // console.log(`DEBUG_MATCH: New Best Substring Match: Length ${longestMatchLength}, Rank ${bestSubstringMatchRank}, CORE Title: "${entry.title}"`);
+                    }
+                }
+            }
+        }
+    }
+
+    if (bestSubstringMatchRank !== null) {
+        console.log(`DEBUG_MATCH: !!! SUBSTRING MATCH CHOSEN !!! Rank: ${bestSubstringMatchRank} for GS Venue: "${venueName}"`);
+        return bestSubstringMatchRank;
+    }
+    // console.log(`DEBUG_MATCH: No Substring Match Found. Proceeding to Fuzzy Match.`);
+
+    let bestFuzzyScore = 0;
+    let bestFuzzyRank: string | null = null;
+    // console.log(`DEBUG_MATCH: Starting Fuzzy Match Attempt for GS Cleaned: "${gsCleanedForTitleMatch}" with threshold ${FUZZY_THRESHOLD}`);
+    for (const entry of coreData) {
+        if (!entry.title) continue;
+        let coreTitleCleanedForFuzzy = cleanTextForComparison(entry.title, false);
+        coreTitleCleanedForFuzzy = stripOrgPrefixes(coreTitleCleanedForFuzzy);
+
+        if (coreTitleCleanedForFuzzy.length < 6 || gsCleanedForTitleMatch.length < 6) continue;
+
+        const score = jaroWinkler(gsCleanedForTitleMatch, coreTitleCleanedForFuzzy);
+        // Log every fuzzy comparison if needed, or conditionally
+        // if (scholarVenueLower.includes("mobiquitous")) {
+        //      console.log(`DEBUG_MATCH_FUZZY_CHECK: Score: ${score.toFixed(3)} for GS: "${gsCleanedForTitleMatch}" vs CORE: "${coreTitleCleanedForFuzzy}" (Original CORE: "${entry.title}", Rank: ${entry.rank})`);
+        // }
+
+        if (score >= FUZZY_THRESHOLD && score > bestFuzzyScore) {
+            bestFuzzyScore = score;
+            bestFuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
+            // console.log(`DEBUG_MATCH: New Best Fuzzy Match: Score ${bestFuzzyScore.toFixed(3)}, Rank ${bestFuzzyRank}, CORE Title: "${entry.title}"`);
+            if (score === 1.0) { // Perfect fuzzy match
+                // console.log(`DEBUG_MATCH: Perfect Fuzzy Match (1.0) found. Breaking.`);
+                break;
+            }
+        }
+    }
+
+    if (bestFuzzyRank !== null) {
+        console.log(`DEBUG_MATCH: !!! FUZZY MATCH CHOSEN !!! Rank: ${bestFuzzyRank}, Score: ${bestFuzzyScore.toFixed(3)} for GS Venue: "${venueName}"`);
+        return bestFuzzyRank;
+    }
+
+    console.log(`DEBUG_MATCH: --- NO MATCH FOUND for GS Venue: "${venueName}" (GS Cleaned: "${gsCleanedForTitleMatch}") ---`);
     return "N/A";
 }
 
 function extractPotentialAcronymsFromText(scholarVenueName: string): string[] {
-    const acronyms: Set<string> = new Set(); const originalVenueName = scholarVenueName;
+    const acronyms: Set<string> = new Set();
+    const originalVenueName = scholarVenueName;
+
     const parentheticalMatches = originalVenueName.match(/\(([^)]+)\)/g);
-    if (parentheticalMatches) { parentheticalMatches.forEach(match => { const contentInParen = match.slice(1, -1).trim(); const potentialAcronymsInParen = contentInParen.match(/([A-Z]{2,}[0-9']*\b|[A-Z]+[0-9]+[A-Z0-9]*\b|[A-Z][a-zA-Z0-9]{1,9}\b)/g); if (potentialAcronymsInParen) { potentialAcronymsInParen.forEach(pAcronym => { let cleanedParenAcronym = pAcronym.replace(/'\d{2,4}$/, '').replace(/'s$/, ''); if (cleanedParenAcronym.length >= 2 && cleanedParenAcronym.length <= 12 && !/^\d+$/.test(cleanedParenAcronym) && !IGNORE_KEYWORDS.includes(cleanedParenAcronym.toLowerCase()) && cleanedParenAcronym.toLowerCase() !== "was" && cleanedParenAcronym.toLowerCase() !== "formerly") { acronyms.add(cleanedParenAcronym.toLowerCase()); } }); } else { if (contentInParen.length >= 2 && contentInParen.length <= 12 && /^[A-Za-z0-9]+$/.test(contentInParen) && !contentInParen.includes(" ") && !contentInParen.includes("-") && !/^\d+$/.test(contentInParen) && !IGNORE_KEYWORDS.includes(contentInParen.toLowerCase()) && contentInParen.toLowerCase() !== "was" && contentInParen.toLowerCase() !== "formerly") { acronyms.add(contentInParen.toLowerCase()); } } }); }
-    let textWithoutParens = originalVenueName.replace(/\s*\([^)]*\)\s*/g, ' ').trim(); textWithoutParens = textWithoutParens.replace(/\b(Proceedings\s+of\s+(the)?|Proc\.\s+of\s+(the)?|International\s+Conference\s+on|Intl\.\s+Conf\.\s+on|Conference\s+on|Symposium\s+on|Workshop\s+on|Journal\s+of)\b/gi, ' ').trim();
-    const words = textWithoutParens.split(/[\s\-‑\/.,:;&]+/); const commonNonAcronymWords = new Set([...IGNORE_KEYWORDS, 'proc', 'data', 'services','models', 'security', 'time','proceedings', 'journal', 'conference', 'conf', 'symposium', 'symp', 'workshop', 'ws', 'international', 'intl', 'natl', 'national', 'annual', 'vol', 'volume', 'no', 'number', 'pp', 'page', 'pages', 'part', 'edition', 'of', 'the', 'on', 'in', 'and', 'for', 'to', 'at', 'st', 'nd', 'rd', 'th', 'springer', 'elsevier', 'wiley', 'press', 'extended', 'abstracts', 'poster', 'session', 'sessions', 'doctoral', 'companion', 'joint', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'advances', 'systems', 'networks', 'computing', 'applications', 'technology', 'technologies', 'research', 'science', 'sciences', 'engineering', 'management', 'information', 'communication', 'communications', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 'letters', 'bulletin', 'archive', 'archives', 'series', 'chapter', 'section', 'tutorial', 'tutorials', 'report', 'technical', 'tech', ...(Array.from({length: 75}, (_, i) => (1970 + i).toString()))]);
-    words.forEach(word => { const cleanWordOriginalCase = word.trim(); if (cleanWordOriginalCase.length >= 2 && cleanWordOriginalCase.length <= 12 && !/^\d+$/.test(cleanWordOriginalCase)) { if ((!commonNonAcronymWords.has(cleanWordOriginalCase.toLowerCase())) && ( /^[A-Z0-9]+$/.test(cleanWordOriginalCase) || /^[A-Z][a-z]+[A-Z]+[A-Za-z0-9]*$/.test(cleanWordOriginalCase))) { acronyms.add(cleanWordOriginalCase.toLowerCase()); } } });
-    if (acronyms.size === 0 && originalVenueName.length >= 2 && originalVenueName.length <= 10 && !originalVenueName.includes(" ") && /^[A-Za-z0-9]+$/.test(originalVenueName) && !/^\d+$/.test(originalVenueName) && !commonNonAcronymWords.has(originalVenueName.toLowerCase())) { acronyms.add(originalVenueName.toLowerCase()); }
+    if (parentheticalMatches) {
+        parentheticalMatches.forEach(match => {
+            const contentInParen = match.slice(1, -1).trim();
+
+            // New strategy for parenthetical content:
+            // Split by common delimiters like comma or semicolon first, then process each part.
+            const partsInParen = contentInParen.split(/[,;]/).map(p => p.trim());
+
+            for (const part of partsInParen) {
+                // Try to match a whole "word" that looks like an acronym (mixed case, all caps, with numbers)
+                // This regex aims to capture entities like "MobiQuitous", "ICSE", "CIKM'23" as one.
+                // It looks for sequences of letters, possibly interspersed with numbers,
+                // where there's at least one uppercase letter if it's mixed case, or it's all caps.
+                // Or it's a typical all-caps acronym.
+                const potentialAcronym = part.match(/^([A-Z][a-zA-Z0-9'’]*[a-zA-Z0-9]|[A-Z]{2,}[0-9'’]*)$/);
+
+                if (potentialAcronym && potentialAcronym[0]) {
+                    let extracted = potentialAcronym[0];
+                    // console.log(`DEBUG_ACRO_EXTRACT: Parenthetical part: "${part}", Matched as potential acronym: "${extracted}"`);
+                    let cleanedParenAcronym = extracted.replace(/['’]\d{2,4}$/, '').replace(/['’]s$/, ''); // Handle 'YY or 's
+
+                    if (cleanedParenAcronym.length >= 2 && cleanedParenAcronym.length <= 12 &&
+                        !/^\d+$/.test(cleanedParenAcronym) &&
+                        !IGNORE_KEYWORDS.includes(cleanedParenAcronym.toLowerCase()) &&
+                        !["was", "formerly", "inc", "ltd", "vol", "no"].includes(cleanedParenAcronym.toLowerCase()) // More exclusions
+                        ) {
+                        // console.log(`DEBUG_ACRO_EXTRACT: Adding from parenthesis: "${cleanedParenAcronym.toLowerCase()}"`);
+                        acronyms.add(cleanedParenAcronym.toLowerCase());
+                    }
+                } else {
+                    // Fallback for simpler all-caps or single-word patterns if the above doesn't catch it
+                    // This is similar to your original regex but simplified for single parts
+                    const simplerPatterns = part.match(/([A-Z]{2,}[0-9']*\b|[A-Z]+[0-9]+[A-Z0-9]*\b)/g);
+                    if (simplerPatterns) {
+                        simplerPatterns.forEach(pAcronym => {
+                            let cleanedParenAcronym = pAcronym.replace(/['’]\d{2,4}$/, '').replace(/['’]s$/, '');
+                             if (cleanedParenAcronym.length >= 2 && cleanedParenAcronym.length <= 12 &&
+                                !/^\d+$/.test(cleanedParenAcronym) &&
+                                !IGNORE_KEYWORDS.includes(cleanedParenAcronym.toLowerCase()) &&
+                                !["was", "formerly"].includes(cleanedParenAcronym.toLowerCase())
+                                ) {
+                                // console.log(`DEBUG_ACRO_EXTRACT: Adding from simpler pattern in parenthesis: "${cleanedParenAcronym.toLowerCase()}"`);
+                                acronyms.add(cleanedParenAcronym.toLowerCase());
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    }
+
+    // --- Rest of the function for acronyms OUTSIDE parentheses remains the same ---
+    let textWithoutParens = originalVenueName.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+    textWithoutParens = textWithoutParens.replace(/\b(Proceedings\s+of\s+(the)?|Proc\.\s+of\s+(the)?|International\s+Conference\s+on|Intl\.\s+Conf\.\s+on|Conference\s+on|Symposium\s+on|Workshop\s+on|Journal\s+of)\b/gi, ' ').trim();
+    const words = textWithoutParens.split(/[\s\-‑\/.,:;&]+/);
+    const commonNonAcronymWords = new Set([...IGNORE_KEYWORDS, /* ... all your common words ... */ 'proc', 'data', 'services','models', 'security', 'time','proceedings', 'journal', 'conference', 'conf', 'symposium', 'symp', 'workshop', 'ws', 'international', 'intl', 'natl', 'national', 'annual', 'vol', 'volume', 'no', 'number', 'pp', 'page', 'pages', 'part', 'edition', 'of', 'the', 'on', 'in', 'and', 'for', 'to', 'at', 'st', 'nd', 'rd', 'th', 'springer', 'elsevier', 'wiley', 'press', 'extended', 'abstracts', 'poster', 'session', 'sessions', 'doctoral', 'companion', 'joint', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'advances', 'systems', 'networks', 'computing', 'applications', 'technology', 'technologies', 'research', 'science', 'sciences', 'engineering', 'management', 'information', 'communication', 'communications', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 'letters', 'bulletin', 'archive', 'archives', 'series', 'chapter', 'section', 'tutorial', 'tutorials', 'report', 'technical', 'tech', ...(Array.from({length: 75}, (_, i) => (1970 + i).toString()))]);
+    words.forEach(word => {
+        const cleanWordOriginalCase = word.trim();
+        if (cleanWordOriginalCase.length >= 2 && cleanWordOriginalCase.length <= 12 && !/^\d+$/.test(cleanWordOriginalCase)) {
+            if ((!commonNonAcronymWords.has(cleanWordOriginalCase.toLowerCase())) &&
+                ( /^[A-Z0-9]+$/.test(cleanWordOriginalCase) || // All caps (with numbers)
+                  /^[A-Z][a-z]+[A-Z]+[A-Za-z0-9]*$/.test(cleanWordOriginalCase) || // CamelCase like TeX
+                  /^[A-Z][A-Z0-9]+$/.test(cleanWordOriginalCase) && cleanWordOriginalCase.length <=5 ) // Short, mostly caps like MobiCom
+                ) {
+                 // console.log(`DEBUG_ACRO_EXTRACT: Adding from outside parenthesis: "${cleanWordOriginalCase.toLowerCase()}"`);
+                acronyms.add(cleanWordOriginalCase.toLowerCase());
+            }
+        }
+    });
+
+    if (acronyms.size === 0 &&
+        originalVenueName.length >= 2 && originalVenueName.length <= 10 &&
+        !originalVenueName.includes(" ") && /^[A-Za-z0-9]+$/.test(originalVenueName) &&
+        !/^\d+$/.test(originalVenueName) &&
+        !commonNonAcronymWords.has(originalVenueName.toLowerCase())) {
+        // console.log(`DEBUG_ACRO_EXTRACT: Adding whole venue name as acronym: "${originalVenueName.toLowerCase()}"`);
+        acronyms.add(originalVenueName.toLowerCase());
+    }
+    // console.log(`DEBUG_ACRO_EXTRACT: Final extracted acronyms for "${scholarVenueName}": [${Array.from(acronyms).join(', ')}]`);
     return Array.from(acronyms);
 }
 // --- END: CORE Data, Venue Fetching, Cleaning, Matching ---
