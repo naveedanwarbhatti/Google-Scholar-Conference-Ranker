@@ -6,15 +6,15 @@ interface CoreEntry {
   rank: string;
 }
 
-// For caching individual publication ranks
+
 interface PublicationRankInfo {
-    titleText: string; // Normalized title from the link element on the profile page
+    titleText: string; 
     rank: string;
 }
 
 interface CachedProfileData {
     rankCounts: Record<string, number>;
-    publicationRanks: PublicationRankInfo[]; // Stores ranks for individual publications
+    publicationRanks: PublicationRankInfo[]; 
     timestamp: number; // Unix timestamp in milliseconds
 }
 
@@ -36,14 +36,14 @@ console.log("Google Scholar Ranker: Content script loaded (vOptionA_DynamicResto
 const coreDataCache: Record<string, CoreEntry[]> = {};
 let isMainProcessing = false;
 
-// --- START: Globals for Option A dynamic restore ---
+
 let activeCachedPublicationRanks: PublicationRankInfo[] | null = null;
 let publicationTableObserver: MutationObserver | null = null;
 let rankMapForObserver: Map<string, string> | null = null;
-// --- END: Globals ---
 
 
-// --- START: Caching Helper Functions ---
+
+
 function getScholarUserId(): string | null {
     const params = new URLSearchParams(window.location.search);
     const userId = params.get('user');
@@ -61,7 +61,7 @@ async function loadCachedData(userId: string): Promise<CachedProfileData | null>
     try {
         const result = await chrome.storage.local.get(cacheKey);
         if (chrome.runtime.lastError) {
-            console.error("DEBUG: loadCachedData - chrome.runtime.lastError:", chrome.runtime.lastError.message);
+            //console.error("DEBUG: loadCachedData - chrome.runtime.lastError:", chrome.runtime.lastError.message);
         }
         if (result && result[cacheKey]) {
             const data = result[cacheKey] as CachedProfileData;
@@ -71,7 +71,7 @@ async function loadCachedData(userId: string): Promise<CachedProfileData | null>
                     // console.log("DEBUG: loadCachedData - Cache is FRESH for user", userId);
                     return data;
                 } else {
-                    console.warn("DEBUG: loadCachedData - Cached data structure invalid. Removing.");
+                    //console.warn("DEBUG: loadCachedData - Cached data structure invalid. Removing.");
                     await chrome.storage.local.remove(cacheKey);
                 }
             } else {
@@ -80,7 +80,7 @@ async function loadCachedData(userId: string): Promise<CachedProfileData | null>
             }
         }
     } catch (error) {
-        console.error("DEBUG: loadCachedData - Error:", error, "Key:", cacheKey);
+        //console.error("DEBUG: loadCachedData - Error:", error, "Key:", cacheKey);
     }
     return null;
 }
@@ -119,10 +119,9 @@ async function clearCachedData(userId: string): Promise<void> {
         console.error("DEBUG: clearCachedData - Error:", error, "Key:", cacheKey);
     }
 }
-// --- END: Caching Helper Functions ---
 
 
-// --- START: expandAllPublications function ---
+
 async function expandAllPublications(statusElement: HTMLElement): Promise<void> {
   // console.log("Google Scholar Ranker: Attempting to expand all publications...");
   const showMoreButtonId = 'gsc_bpf_more';
@@ -169,10 +168,10 @@ async function expandAllPublications(statusElement: HTMLElement): Promise<void> 
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
 }
-// --- END: expandAllPublications function ---
 
 
-// --- START: CORE Data, Venue Fetching, Cleaning, Matching ---
+
+
 function getCoreDataFileForYear(pubYear: number | null): string {
     if (pubYear === null) { return 'core/CORE_2023.json'; }
     if (pubYear >= 2023) return 'core/CORE_2023.json';
@@ -303,7 +302,7 @@ function stripOrgPrefixes(text: string): string {
 function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
     const scholarVenueLower = venueName.toLowerCase().trim();
     // DEBUG LOG 1: Initial venue name
-    console.log(`DEBUG_MATCH: --- Evaluating GS Venue: "${venueName}" (Normalized Lower: "${scholarVenueLower}") ---`);
+    //console.log(`DEBUG_MATCH: --- Evaluating GS Venue: "${venueName}" (Normalized Lower: "${scholarVenueLower}") ---`);
 
     if (!scholarVenueLower) {
         // console.log("DEBUG_MATCH: GS Venue is empty, returning N/A.");
@@ -320,7 +319,7 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
 
     const extractedScholarAcronyms = extractPotentialAcronymsFromText(venueName);
     // DEBUG LOG 2: Extracted acronyms
-    console.log(`DEBUG_MATCH: Extracted GS Acronyms: [${extractedScholarAcronyms.join(', ')}] for GS Venue: "${venueName}"`);
+    //console.log(`DEBUG_MATCH: Extracted GS Acronyms: [${extractedScholarAcronyms.join(', ')}] for GS Venue: "${venueName}"`);
 
     if (extractedScholarAcronyms.length > 0) {
         for (const scholarAcro of extractedScholarAcronyms) {
@@ -329,10 +328,10 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
                     const coreAcro = entry.acronym.toLowerCase().trim();
                     // DEBUG LOG 3: Acronym comparison - Log more generally now
                     // Conditional logging for specific cases can be re-added if console becomes too noisy
-                    console.log(`DEBUG_MATCH_ACRO_COMPARE: GS Acro: "${scholarAcro}" vs CORE Acro: "${coreAcro}" (CORE Title: "${entry.title}", Rank: ${entry.rank})`);
+                    //console.log(`DEBUG_MATCH_ACRO_COMPARE: GS Acro: "${scholarAcro}" vs CORE Acro: "${coreAcro}" (CORE Title: "${entry.title}", Rank: ${entry.rank})`);
                     if (coreAcro && coreAcro === scholarAcro) {
                         // DEBUG LOG 4: Acronym match found
-                        console.log(`DEBUG_MATCH: !!! ACRONYM EXACT MATCH FOUND !!! GS Acro: "${scholarAcro}" to CORE Acro: "${coreAcro}". Rank: ${entry.rank}`);
+                        //console.log(`DEBUG_MATCH: !!! ACRONYM EXACT MATCH FOUND !!! GS Acro: "${scholarAcro}" to CORE Acro: "${coreAcro}". Rank: ${entry.rank}`);
                         return VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
                     }
                 }
@@ -344,7 +343,7 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
 
     const gsCleanedForTitleMatch = cleanTextForComparison(scholarVenueLower, true);
     // DEBUG LOG 5: Cleaned GS venue for title matching
-    console.log(`DEBUG_MATCH: GS Venue Cleaned for Title Match: "${gsCleanedForTitleMatch}"`);
+    //console.log(`DEBUG_MATCH: GS Venue Cleaned for Title Match: "${gsCleanedForTitleMatch}"`);
 
     if (!gsCleanedForTitleMatch) {
         // console.log("DEBUG_MATCH: GS Venue cleaned for title match is empty, returning N/A.");
@@ -394,10 +393,7 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
         if (coreTitleCleanedForFuzzy.length < 6 || gsCleanedForTitleMatch.length < 6) continue;
 
         const score = jaroWinkler(gsCleanedForTitleMatch, coreTitleCleanedForFuzzy);
-        // Log every fuzzy comparison if needed, or conditionally
-        // if (scholarVenueLower.includes("mobiquitous")) {
-        //      console.log(`DEBUG_MATCH_FUZZY_CHECK: Score: ${score.toFixed(3)} for GS: "${gsCleanedForTitleMatch}" vs CORE: "${coreTitleCleanedForFuzzy}" (Original CORE: "${entry.title}", Rank: ${entry.rank})`);
-        // }
+        
 
         if (score >= FUZZY_THRESHOLD && score > bestFuzzyScore) {
             bestFuzzyScore = score;
@@ -433,11 +429,7 @@ function extractPotentialAcronymsFromText(scholarVenueName: string): string[] {
             const partsInParen = contentInParen.split(/[,;]/).map(p => p.trim());
 
             for (const part of partsInParen) {
-                // Try to match a whole "word" that looks like an acronym (mixed case, all caps, with numbers)
-                // This regex aims to capture entities like "MobiQuitous", "ICSE", "CIKM'23" as one.
-                // It looks for sequences of letters, possibly interspersed with numbers,
-                // where there's at least one uppercase letter if it's mixed case, or it's all caps.
-                // Or it's a typical all-caps acronym.
+                
                 const potentialAcronym = part.match(/^([A-Z][a-zA-Z0-9'’]*[a-zA-Z0-9]|[A-Z]{2,}[0-9'’]*)$/);
 
                 if (potentialAcronym && potentialAcronym[0]) {
@@ -454,8 +446,7 @@ function extractPotentialAcronymsFromText(scholarVenueName: string): string[] {
                         acronyms.add(cleanedParenAcronym.toLowerCase());
                     }
                 } else {
-                    // Fallback for simpler all-caps or single-word patterns if the above doesn't catch it
-                    // This is similar to your original regex but simplified for single parts
+                    
                     const simplerPatterns = part.match(/([A-Z]{2,}[0-9']*\b|[A-Z]+[0-9]+[A-Z0-9]*\b)/g);
                     if (simplerPatterns) {
                         simplerPatterns.forEach(pAcronym => {
@@ -475,7 +466,7 @@ function extractPotentialAcronymsFromText(scholarVenueName: string): string[] {
         });
     }
 
-    // --- Rest of the function for acronyms OUTSIDE parentheses remains the same ---
+    
     let textWithoutParens = originalVenueName.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
     textWithoutParens = textWithoutParens.replace(/\b(Proceedings\s+of\s+(the)?|Proc\.\s+of\s+(the)?|International\s+Conference\s+on|Intl\.\s+Conf\.\s+on|Conference\s+on|Symposium\s+on|Workshop\s+on|Journal\s+of)\b/gi, ' ').trim();
     const words = textWithoutParens.split(/[\s\-‑\/.,:;&]+/);
@@ -505,10 +496,8 @@ function extractPotentialAcronymsFromText(scholarVenueName: string): string[] {
     // console.log(`DEBUG_ACRO_EXTRACT: Final extracted acronyms for "${scholarVenueName}": [${Array.from(acronyms).join(', ')}]`);
     return Array.from(acronyms);
 }
-// --- END: CORE Data, Venue Fetching, Cleaning, Matching ---
 
 
-// --- START: UI Functions ---
 function displayRankBadgeAfterTitle(rowElement: HTMLElement, rank: string) {
     const titleCell = rowElement.querySelector('td.gsc_a_t');
     if (titleCell) { const oldBadge = titleCell.querySelector('span.gsr-rank-badge-inline'); oldBadge?.remove(); }
@@ -713,14 +702,13 @@ function displaySummaryPanel(rankCounts: Record<string, number>, currentUserId: 
         disconnectPublicationTableObserver();
     }
 }
-// --- END: UI Functions ---
 
-// --- START: MutationObserver Functions for Option A ---
+
 function setupPublicationTableObserver() {
     disconnectPublicationTableObserver(); // Ensure no multiple observers
 
     const tableBody = document.querySelector('#gsc_a_b');
-    // Ensure rankMapForObserver is also checked here before setting up
+    
     if (!tableBody || !activeCachedPublicationRanks || !rankMapForObserver) {
         // console.log("DEBUG: setupPublicationTableObserver - No table body or no active cache/rankMap to observe for.");
         return;
@@ -743,9 +731,7 @@ function setupPublicationTableObserver() {
                         const linkEl = rowElement.querySelector('td.gsc_a_t a.gsc_a_at');
                         if (linkEl instanceof HTMLAnchorElement && linkEl.textContent) {
                             const currentTitleText = linkEl.textContent.trim().toLowerCase();
-                            // Now that we've checked rankMapForObserver above, this access is safer.
-                            // TypeScript might still complain if it can't infer the check covers this specific line.
-                            // We can use a non-null assertion if we're confident from the logic.
+                            
                             const cachedRank = rankMapForObserver!.get(currentTitleText); // Added '!'
                             if (cachedRank) {
                                 // console.log(`DEBUG: Observer found rank "${cachedRank}" for new row: "${currentTitleText}"`);
@@ -766,10 +752,9 @@ function disconnectPublicationTableObserver() {
         publicationTableObserver = null;
     }
 }
-// --- END: MutationObserver Functions ---
 
 
-// --- START: Helper Function to Restore Badges for Option A (for initially visible items) ---
+
 function restoreVisibleInlineBadgesFromCache(
     cachedRanks: PublicationRankInfo[]
 ): void {
@@ -800,10 +785,10 @@ function restoreVisibleInlineBadgesFromCache(
         }
     });
 }
-// --- END: Helper Function to Restore Badges ---
 
 
-// --- START: Main Orchestration ---
+
+
 async function main() {
   if (isMainProcessing) { return; }
   isMainProcessing = true;
@@ -881,10 +866,10 @@ async function main() {
     }
 
     if (currentUserId) {
-        // For Option A, we are now saving detailed publication ranks.
+        
         await saveCachedData(currentUserId, rankCounts, determinedPublicationRanks);
     }
-    // Pass determinedPublicationRanks so observer can be set up based on fresh results.
+    
     displaySummaryPanel(rankCounts, currentUserId, determinedPublicationRanks);
   } catch (error) {
       console.error("GSR: Uncaught error in main pipeline:", error);
@@ -921,4 +906,3 @@ async function initialLoad() {
 if (document.getElementById('gsc_a_b') && window.location.pathname.includes("/citations")) {
     setTimeout(() => { initialLoad(); }, 500);
 }
-// --- END: Main Orchestration ---
