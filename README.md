@@ -72,7 +72,7 @@ This extension is currently in BETA. Your feedback is invaluable!
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details (You'll need to create a LICENSE file with the MIT license text).
+This project is licensed under the MIT License
 
 
 ⭐ **Like it?** Give the repo a star—helps other researchers discover the extension!
