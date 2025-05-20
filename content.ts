@@ -8,13 +8,13 @@ interface CoreEntry {
 
 
 interface PublicationRankInfo {
-    titleText: string; 
+    titleText: string; // Normalized title from the link element on the profile page
     rank: string;
 }
 
 interface CachedProfileData {
     rankCounts: Record<string, number>;
-    publicationRanks: PublicationRankInfo[]; 
+    publicationRanks: PublicationRankInfo[]; // Stores ranks for individual publications
     timestamp: number; // Unix timestamp in milliseconds
 }
 
@@ -97,10 +97,10 @@ async function saveCachedData(userId: string, rankCounts: Record<string, number>
         await chrome.storage.local.set({ [cacheKey]: dataToStore });
         // console.log("DEBUG: saveCachedData - Success for user", userId);
         if (chrome.runtime.lastError) {
-            console.error("DEBUG: saveCachedData - chrome.runtime.lastError:", chrome.runtime.lastError.message);
+            //console.error("DEBUG: saveCachedData - chrome.runtime.lastError:", chrome.runtime.lastError.message);
         }
     } catch (error) {
-        console.error("DEBUG: saveCachedData - Error:", error, "Key:", cacheKey);
+        //console.error("DEBUG: saveCachedData - Error:", error, "Key:", cacheKey);
     }
 }
 
@@ -113,10 +113,10 @@ async function clearCachedData(userId: string): Promise<void> {
         rankMapForObserver = null;
         disconnectPublicationTableObserver();
         if (chrome.runtime.lastError) {
-            console.error("DEBUG: clearCachedData - chrome.runtime.lastError:", chrome.runtime.lastError.message);
+            //console.error("DEBUG: clearCachedData - chrome.runtime.lastError:", chrome.runtime.lastError.message);
         }
     } catch (error) {
-        console.error("DEBUG: clearCachedData - Error:", error, "Key:", cacheKey);
+        //console.error("DEBUG: clearCachedData - Error:", error, "Key:", cacheKey);
     }
 }
 
@@ -141,7 +141,7 @@ async function expandAllPublications(statusElement: HTMLElement): Promise<void> 
     if (statusTextElement) statusTextElement.textContent = `Expanding publications... (click ${attempts + 1})`;
     const tableBody = document.querySelector(publicationsTableBodySelector);
     if (!tableBody) {
-        console.error("Google Scholar Ranker: Publications table body not found.");
+        //console.error("Google Scholar Ranker: Publications table body not found.");
         if (statusTextElement) statusTextElement.textContent = "Error finding table.";
         break;
     }
@@ -168,7 +168,6 @@ async function expandAllPublications(statusElement: HTMLElement): Promise<void> 
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
 }
-
 
 
 
@@ -302,7 +301,7 @@ function stripOrgPrefixes(text: string): string {
 function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
     const scholarVenueLower = venueName.toLowerCase().trim();
     // DEBUG LOG 1: Initial venue name
-    //console.log(`DEBUG_MATCH: --- Evaluating GS Venue: "${venueName}" (Normalized Lower: "${scholarVenueLower}") ---`);
+    // console.log(`DEBUG_MATCH: --- Evaluating GS Venue: "${venueName}" (Normalized Lower: "${scholarVenueLower}") ---`);
 
     if (!scholarVenueLower) {
         // console.log("DEBUG_MATCH: GS Venue is empty, returning N/A.");
@@ -319,19 +318,16 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
 
     const extractedScholarAcronyms = extractPotentialAcronymsFromText(venueName);
     // DEBUG LOG 2: Extracted acronyms
-    //console.log(`DEBUG_MATCH: Extracted GS Acronyms: [${extractedScholarAcronyms.join(', ')}] for GS Venue: "${venueName}"`);
+    // console.log(`DEBUG_MATCH: Extracted GS Acronyms: [${extractedScholarAcronyms.join(', ')}] for GS Venue: "${venueName}"`);
 
     if (extractedScholarAcronyms.length > 0) {
         for (const scholarAcro of extractedScholarAcronyms) {
             for (const entry of coreData) {
                 if (entry.acronym) {
                     const coreAcro = entry.acronym.toLowerCase().trim();
-                    // DEBUG LOG 3: Acronym comparison - Log more generally now
-                    // Conditional logging for specific cases can be re-added if console becomes too noisy
-                    //console.log(`DEBUG_MATCH_ACRO_COMPARE: GS Acro: "${scholarAcro}" vs CORE Acro: "${coreAcro}" (CORE Title: "${entry.title}", Rank: ${entry.rank})`);
+                    
                     if (coreAcro && coreAcro === scholarAcro) {
-                        // DEBUG LOG 4: Acronym match found
-                        //console.log(`DEBUG_MATCH: !!! ACRONYM EXACT MATCH FOUND !!! GS Acro: "${scholarAcro}" to CORE Acro: "${coreAcro}". Rank: ${entry.rank}`);
+                        
                         return VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
                     }
                 }
@@ -343,7 +339,7 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
 
     const gsCleanedForTitleMatch = cleanTextForComparison(scholarVenueLower, true);
     // DEBUG LOG 5: Cleaned GS venue for title matching
-    //console.log(`DEBUG_MATCH: GS Venue Cleaned for Title Match: "${gsCleanedForTitleMatch}"`);
+    // console.log(`DEBUG_MATCH: GS Venue Cleaned for Title Match: "${gsCleanedForTitleMatch}"`);
 
     if (!gsCleanedForTitleMatch) {
         // console.log("DEBUG_MATCH: GS Venue cleaned for title match is empty, returning N/A.");
@@ -358,18 +354,15 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
             let coreTitleCleaned = cleanTextForComparison(entry.title, false);
             coreTitleCleaned = stripOrgPrefixes(coreTitleCleaned);
 
-            // Log every comparison for substring check if needed, or conditionally
-            // if (scholarVenueLower.includes("mobiquitous")) {
-            //     console.log(`DEBUG_MATCH_SUBSTRING_CHECK: GS: "${gsCleanedForTitleMatch}" vs CORE Cleaned: "${coreTitleCleaned}" (Original CORE: "${entry.title}")`);
-            // }
+            
 
             if (gsCleanedForTitleMatch && coreTitleCleaned && coreTitleCleaned.length > 5) {
                 if (gsCleanedForTitleMatch.includes(coreTitleCleaned)) {
-                    // console.log(`DEBUG_MATCH: Potential Substring Match: CORE "${coreTitleCleaned}" in GS "${gsCleanedForTitleMatch}" (Rank: ${entry.rank})`);
+                    
                     if (coreTitleCleaned.length > longestMatchLength) {
                         longestMatchLength = coreTitleCleaned.length;
                         bestSubstringMatchRank = VALID_RANKS.includes(entry.rank) ? entry.rank : "N/A";
-                        // console.log(`DEBUG_MATCH: New Best Substring Match: Length ${longestMatchLength}, Rank ${bestSubstringMatchRank}, CORE Title: "${entry.title}"`);
+                        
                     }
                 }
             }
@@ -377,7 +370,7 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
     }
 
     if (bestSubstringMatchRank !== null) {
-        console.log(`DEBUG_MATCH: !!! SUBSTRING MATCH CHOSEN !!! Rank: ${bestSubstringMatchRank} for GS Venue: "${venueName}"`);
+        // console.log(`DEBUG_MATCH: !!! SUBSTRING MATCH CHOSEN !!! Rank: ${bestSubstringMatchRank} for GS Venue: "${venueName}"`);
         return bestSubstringMatchRank;
     }
     // console.log(`DEBUG_MATCH: No Substring Match Found. Proceeding to Fuzzy Match.`);
@@ -407,11 +400,11 @@ function findRankForVenue(venueName: string, coreData: CoreEntry[]): string {
     }
 
     if (bestFuzzyRank !== null) {
-        console.log(`DEBUG_MATCH: !!! FUZZY MATCH CHOSEN !!! Rank: ${bestFuzzyRank}, Score: ${bestFuzzyScore.toFixed(3)} for GS Venue: "${venueName}"`);
+        // console.log(`DEBUG_MATCH: !!! FUZZY MATCH CHOSEN !!! Rank: ${bestFuzzyRank}, Score: ${bestFuzzyScore.toFixed(3)} for GS Venue: "${venueName}"`);
         return bestFuzzyRank;
     }
 
-    console.log(`DEBUG_MATCH: --- NO MATCH FOUND for GS Venue: "${venueName}" (GS Cleaned: "${gsCleanedForTitleMatch}") ---`);
+    // console.log(`DEBUG_MATCH: --- NO MATCH FOUND for GS Venue: "${venueName}" (GS Cleaned: "${gsCleanedForTitleMatch}") ---`);
     return "N/A";
 }
 
@@ -424,8 +417,7 @@ function extractPotentialAcronymsFromText(scholarVenueName: string): string[] {
         parentheticalMatches.forEach(match => {
             const contentInParen = match.slice(1, -1).trim();
 
-            // New strategy for parenthetical content:
-            // Split by common delimiters like comma or semicolon first, then process each part.
+           
             const partsInParen = contentInParen.split(/[,;]/).map(p => p.trim());
 
             for (const part of partsInParen) {
@@ -498,26 +490,59 @@ function extractPotentialAcronymsFromText(scholarVenueName: string): string[] {
 }
 
 
+
+function createRankBadgeElement(rank: string): HTMLSpanElement | null {
+    if (!VALID_RANKS.includes(rank) && rank !== "N/A") {
+        return null;
+    }
+
+    const badge = document.createElement('span');
+    badge.textContent = rank;
+    badge.style.display = 'inline-block';
+    badge.style.padding = '2px 6px';
+    badge.style.marginLeft = '10px';
+    badge.style.fontSize = '0.9em';
+    badge.style.fontWeight = 'bold';
+    badge.style.color = '#000000';
+    badge.style.border = '1px solid #ccc';
+    badge.style.borderRadius = '3px';
+    badge.style.verticalAlign = 'middle';
+    badge.style.minWidth = '30px';
+    badge.style.textAlign = 'center';
+
+    if (rank === "N/A") {
+        badge.style.backgroundColor = '#f0f0f0';
+        badge.style.borderColor = '#bdbdbd';
+        badge.style.color = '#555';
+    } else {
+        switch (rank) {
+            case "A*": badge.style.backgroundColor = '#FFD700'; badge.style.borderColor = '#B8860B'; break;
+            case "A":  badge.style.backgroundColor = '#90EE90'; badge.style.borderColor = '#3CB371'; break;
+            case "B":  badge.style.backgroundColor = '#ADFF2F'; badge.style.borderColor = '#7FFF00'; break;
+            case "C":  badge.style.backgroundColor = '#FFA07A'; badge.style.borderColor = '#FA8072'; break;
+        }
+    }
+    return badge;
+}
+
 function displayRankBadgeAfterTitle(rowElement: HTMLElement, rank: string) {
     const titleCell = rowElement.querySelector('td.gsc_a_t');
     if (titleCell) { const oldBadge = titleCell.querySelector('span.gsr-rank-badge-inline'); oldBadge?.remove(); }
     if (!VALID_RANKS.includes(rank)) return;
     const titleLinkElement = rowElement.querySelector('td.gsc_a_t a.gsc_a_at');
     if (!titleLinkElement) return;
-    const badge = document.createElement('span'); badge.classList.add('gsr-rank-badge-inline'); badge.textContent = rank;
-    badge.style.display = 'inline-block'; badge.style.padding = '1px 5px'; badge.style.marginLeft = '8px';
-    badge.style.fontSize = '0.8em'; badge.style.fontWeight = 'bold'; badge.style.color = '#000000';
-    badge.style.border = '1px solid #ccc'; badge.style.borderRadius = '3px';
-    switch (rank) {
-        case "A*": badge.style.backgroundColor = '#FFD700'; badge.style.borderColor = '#B8860B'; break;
-        case "A":  badge.style.backgroundColor = '#90EE90'; badge.style.borderColor = '#3CB371'; break;
-        case "B":  badge.style.backgroundColor = '#ADFF2F'; badge.style.borderColor = '#7FFF00'; break;
-        case "C":  badge.style.backgroundColor = '#FFA07A'; badge.style.borderColor = '#FA8072'; break;
+    
+    const badge = createRankBadgeElement(rank);
+    if (badge) {
+        badge.classList.add('gsr-rank-badge-inline');
+        badge.style.marginLeft = '8px';
+        titleLinkElement.insertAdjacentElement('afterend', badge);
     }
-    titleLinkElement.insertAdjacentElement('afterend', badge);
 }
 
+
 function createStatusElement(initialMessage: string = "Initializing..."): HTMLElement {
+    // ... (This function remains unchanged from the previous version)
     disconnectPublicationTableObserver();
     activeCachedPublicationRanks = null;
     rankMapForObserver = null;
@@ -553,6 +578,7 @@ function createStatusElement(initialMessage: string = "Initializing..."): HTMLEl
 }
 
 function updateStatusElement(statusContainer: HTMLElement, processed: number, total: number) {
+    // ... (This function remains unchanged from the previous version)
     const progressBarInner = statusContainer.querySelector('.gsr-progress-bar-inner') as HTMLElement | null;
     const statusText = statusContainer.querySelector('.gsr-status-text') as HTMLElement | null;
     const percentage = total > 0 ? (processed / total) * 100 : 0;
@@ -560,7 +586,12 @@ function updateStatusElement(statusContainer: HTMLElement, processed: number, to
     if (statusText) statusText.textContent = `Processing ${processed} / ${total}...`;
 }
 
-function displaySummaryPanel(rankCounts: Record<string, number>, currentUserId: string | null, initialCachedPubRanks?: PublicationRankInfo[]) {
+function displaySummaryPanel(
+    rankCounts: Record<string, number>,
+    currentUserId: string | null,
+    initialCachedPubRanks?: PublicationRankInfo[],
+    cacheTimestamp?: number
+) {
     document.getElementById(STATUS_ELEMENT_ID)?.remove();
     document.getElementById(SUMMARY_PANEL_ID)?.remove();
     disconnectPublicationTableObserver();
@@ -570,16 +601,15 @@ function displaySummaryPanel(rankCounts: Record<string, number>, currentUserId: 
     panel.classList.add('gsc_rsb_s', 'gsc_prf_pnl');
     panel.style.padding = '10px'; panel.style.marginBottom = '15px';
 
+    // Panel Header: Title and Refresh Button (same as before)
     const headerDiv = document.createElement('div');
     headerDiv.style.display = 'flex'; headerDiv.style.alignItems = 'center';
     headerDiv.style.justifyContent = 'space-between';
     headerDiv.style.fontSize = '14px'; headerDiv.style.fontWeight = 'bold'; headerDiv.style.color = '#777';
     headerDiv.style.marginBottom = '10px'; headerDiv.style.paddingBottom = '5px'; headerDiv.style.borderBottom = '1px solid #e0e0e0';
-
     const summaryTitle = document.createElement('span');
     summaryTitle.textContent = 'CORE Rank Summary';
     headerDiv.appendChild(summaryTitle);
-
     if (currentUserId) {
         const refreshButton = document.createElement('button');
         refreshButton.textContent = 'Refresh Ranks';
@@ -597,7 +627,7 @@ function displaySummaryPanel(rankCounts: Record<string, number>, currentUserId: 
             disconnectPublicationTableObserver();
             activeCachedPublicationRanks = null;
             rankMapForObserver = null;
-            await clearCachedData(currentUserId);
+            if (currentUserId) await clearCachedData(currentUserId);
             main().catch(error => {
                  console.error("DEBUG: Error during refresh:", error);
                  const statusElem = createStatusElement("Error during refresh. Check console.");
@@ -608,6 +638,7 @@ function displaySummaryPanel(rankCounts: Record<string, number>, currentUserId: 
     }
     panel.appendChild(headerDiv);
 
+    // Ranks List / Chart (same as before)
     const list = document.createElement('ul');
     list.style.listStyle = 'none'; list.style.padding = '0'; list.style.margin = '8px 0 0 0';
     const ranksForChart = ["A*", "A", "B", "C"];
@@ -656,23 +687,131 @@ function displaySummaryPanel(rankCounts: Record<string, number>, currentUserId: 
     }
     panel.appendChild(list);
 
-    const footerDiv = document.createElement('div');
-    footerDiv.style.display = 'flex'; footerDiv.style.justifyContent = 'flex-end';
-    footerDiv.style.alignItems = 'center'; footerDiv.style.marginTop = '10px';
-    footerDiv.style.paddingTop = '5px'; footerDiv.style.borderTop = '1px solid #e0e0e0';
-    const betaLabel = document.createElement('span'); betaLabel.textContent = 'BETA';
+    // Footer 1: Timestamp Information (same as before)
+    if (cacheTimestamp) {
+        const greyLineElement = document.createElement('div');
+        greyLineElement.style.borderTop = '1px solid #e0e0e0';
+        greyLineElement.style.marginTop = '12px';
+        greyLineElement.style.marginBottom = '6px';
+        panel.appendChild(greyLineElement);
+        const timestampTextElement = document.createElement('div');
+        timestampTextElement.style.fontSize = '11px';
+        timestampTextElement.style.color = '#6c757d';
+        timestampTextElement.style.textAlign = 'right';
+        timestampTextElement.style.marginBottom = '10px';
+        const lastRankingTime = new Date(cacheTimestamp);
+        const formattedDate = lastRankingTime.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        const formattedTime = lastRankingTime.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+        timestampTextElement.textContent = `Ranks last updated: ${formattedDate} ${formattedTime}`;
+        panel.appendChild(timestampTextElement);
+    }
+
+    // --- Conference Rank Checker Section (MODIFIED STYLING & simplified logic) ---
+    const checkerSection = document.createElement('div');
+    checkerSection.style.marginTop = cacheTimestamp ? '0px' : '15px';
+    checkerSection.style.paddingTop = '10px';
+    checkerSection.style.borderTop = '1px solid #e0e0e0';
+
+    const checkerTitle = document.createElement('div');
+    checkerTitle.textContent = 'Conference Rank Checker (CORE 2023)'; // Clarify data source
+    checkerTitle.style.fontSize = '13px';
+    checkerTitle.style.fontWeight = 'bold';
+    checkerTitle.style.color = '#555';
+    checkerTitle.style.marginBottom = '8px';
+    checkerSection.appendChild(checkerTitle);
+
+    const checkerInputContainer = document.createElement('div');
+    checkerInputContainer.style.display = 'flex';
+    checkerInputContainer.style.alignItems = 'center';
+
+    const conferenceInput = document.createElement('input');
+    conferenceInput.type = 'text';
+    conferenceInput.placeholder = 'Enter conference name/acronym';
+    conferenceInput.style.flexGrow = '1';
+    conferenceInput.style.padding = '8px 15px'; // Adjusted padding for pill shape
+    conferenceInput.style.fontSize = '13px';
+    conferenceInput.style.border = '1px solid #d0d0d0'; // Slightly darker border for definition
+    conferenceInput.style.borderRadius = '20px';      // Pill shape
+    conferenceInput.style.backgroundColor = '#f8f9fa'; // Very light grey
+    conferenceInput.style.outline = 'none'; // Remove default focus outline
+    conferenceInput.onfocus = () => { conferenceInput.style.borderColor = '#76C7C0'; }; // Highlight on focus
+    conferenceInput.onblur = () => { conferenceInput.style.borderColor = '#d0d0d0'; };
+    checkerInputContainer.appendChild(conferenceInput);
+
+    const rankDisplaySpan = document.createElement('span'); // For the badge
+    rankDisplaySpan.style.minWidth = '40px'; // Placeholder width for badge
+    rankDisplaySpan.style.textAlign = 'center';
+    // marginLeft for the badge will be handled by createRankBadgeElement
+    checkerInputContainer.appendChild(rankDisplaySpan);
+    checkerSection.appendChild(checkerInputContainer);
+
+    let debounceTimeout: number;
+    const debounce = (func: (...args: any[]) => void, delay: number) => {
+        return (...args: any[]) => {
+            clearTimeout(debounceTimeout);
+            debounceTimeout = window.setTimeout(() => func.apply(null, args), delay);
+        };
+    };
+
+    const performRankCheck = async () => {
+        const venueName = conferenceInput.value.trim();
+        rankDisplaySpan.innerHTML = ''; // Clear previous rank badge
+
+        if (!venueName) {
+            return;
+        }
+
+        try {
+            // Always use the latest CORE data by passing null to getCoreDataFileForYear
+            const coreDataForChecker = await loadCoreDataForFile(getCoreDataFileForYear(null));
+            if (coreDataForChecker.length > 0) {
+                const rank = findRankForVenue(venueName, coreDataForChecker);
+                const badgeElement = createRankBadgeElement(rank);
+                if (badgeElement) {
+                    rankDisplaySpan.appendChild(badgeElement);
+                } else {
+                    rankDisplaySpan.textContent = '-';
+                    rankDisplaySpan.style.color = '#999';
+                }
+            } else {
+                rankDisplaySpan.textContent = 'Data N/A';
+                rankDisplaySpan.style.color = '#cc0000';
+            }
+        } catch (error) {
+            console.error("Error in conference rank checker:", error);
+            rankDisplaySpan.textContent = 'Error';
+            rankDisplaySpan.style.color = '#cc0000';
+        }
+    };
+
+    conferenceInput.addEventListener('input', debounce(performRankCheck, 500));
+    panel.appendChild(checkerSection);
+
+    // Footer 2: BETA Label and Report Bug Link (same as before)
+    const finalFooterDiv = document.createElement('div');
+    finalFooterDiv.style.display = 'flex';
+    finalFooterDiv.style.justifyContent = 'flex-end';
+    finalFooterDiv.style.alignItems = 'center';
+    finalFooterDiv.style.marginTop = '15px';
+    finalFooterDiv.style.paddingTop = '5px';
+    finalFooterDiv.style.borderTop = '1px solid #e0e0e0';
+    const betaLabel = document.createElement('span');
+    betaLabel.textContent = 'BETA';
     betaLabel.style.padding = '1px 7px'; betaLabel.style.fontSize = '0.7em'; betaLabel.style.fontWeight = '600';
     betaLabel.style.color = '#fff'; betaLabel.style.backgroundColor = '#6c757d'; betaLabel.style.borderRadius = '10px';
     betaLabel.style.lineHeight = '1.4'; betaLabel.style.height = 'fit-content'; betaLabel.style.display = 'inline-flex';
     betaLabel.style.alignItems = 'center'; betaLabel.style.marginRight = '10px'; betaLabel.style.cursor = 'help';
     betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\nIt is free and open source.\nIt uses historical CORE rankings (2014-2023) based on publication year.\nHelp us spot inconsistencies!\nFor any issues, please click on “Report Bug”.");
-    footerDiv.appendChild(betaLabel);
-    const reportBugLink = document.createElement('a'); reportBugLink.href = "https://forms.office.com/r/PbSzWaQmpJ";
+    finalFooterDiv.appendChild(betaLabel);
+    const reportBugLink = document.createElement('a');
+    reportBugLink.href = "https://forms.office.com/r/PbSzWaQmpJ";
     reportBugLink.target = "_blank"; reportBugLink.style.textDecoration = 'none'; reportBugLink.style.color = '#D32F2F';
     reportBugLink.style.fontSize = '0.8em'; reportBugLink.innerHTML = '🐞 Report Bug';
     reportBugLink.setAttribute('title', 'Report a bug or inconsistency (opens new tab)');
-    footerDiv.appendChild(reportBugLink); panel.appendChild(footerDiv);
+    finalFooterDiv.appendChild(reportBugLink);
+    panel.appendChild(finalFooterDiv);
 
+    // Panel Insertion into Page (same as before)
     const gsBdy = document.getElementById('gs_bdy');
     const rightSidebarContainer = gsBdy?.querySelector('div.gsc_rsb');
     if (rightSidebarContainer) {
@@ -684,8 +823,13 @@ function displaySummaryPanel(rankCounts: Record<string, number>, currentUserId: 
         else if (citedByElement?.nextSibling) rightSidebarContainer.insertBefore(panel, citedByElement.nextSibling);
         else if (citedByElement) citedByElement.parentNode?.appendChild(panel);
         else rightSidebarContainer.prepend(panel);
-    } else { const profileTableContainer = document.getElementById('gsc_a_c'); if (profileTableContainer) profileTableContainer.before(panel); else document.body.prepend(panel); }
+    } else {
+        const profileTableContainer = document.getElementById('gsc_a_c');
+        if (profileTableContainer) profileTableContainer.before(panel);
+        else document.body.prepend(panel);
+    }
 
+    // Observer Setup for dynamic content (same as before)
     if (initialCachedPubRanks && initialCachedPubRanks.length > 0) {
         activeCachedPublicationRanks = initialCachedPubRanks;
         rankMapForObserver = new Map<string, string>();
@@ -704,11 +848,13 @@ function displaySummaryPanel(rankCounts: Record<string, number>, currentUserId: 
 }
 
 
+
+
 function setupPublicationTableObserver() {
     disconnectPublicationTableObserver(); // Ensure no multiple observers
 
     const tableBody = document.querySelector('#gsc_a_b');
-    
+    // Ensure rankMapForObserver is also checked here before setting up
     if (!tableBody || !activeCachedPublicationRanks || !rankMapForObserver) {
         // console.log("DEBUG: setupPublicationTableObserver - No table body or no active cache/rankMap to observe for.");
         return;
@@ -731,7 +877,9 @@ function setupPublicationTableObserver() {
                         const linkEl = rowElement.querySelector('td.gsc_a_t a.gsc_a_at');
                         if (linkEl instanceof HTMLAnchorElement && linkEl.textContent) {
                             const currentTitleText = linkEl.textContent.trim().toLowerCase();
-                            
+                            // Now that we've checked rankMapForObserver above, this access is safer.
+                            // TypeScript might still complain if it can't infer the check covers this specific line.
+                            // We can use a non-null assertion if we're confident from the logic.
                             const cachedRank = rankMapForObserver!.get(currentTitleText); // Added '!'
                             if (cachedRank) {
                                 // console.log(`DEBUG: Observer found rank "${cachedRank}" for new row: "${currentTitleText}"`);
@@ -752,9 +900,10 @@ function disconnectPublicationTableObserver() {
         publicationTableObserver = null;
     }
 }
+// --- END: MutationObserver Functions ---
 
 
-
+// --- START: Helper Function to Restore Badges for Option A (for initially visible items) ---
 function restoreVisibleInlineBadgesFromCache(
     cachedRanks: PublicationRankInfo[]
 ): void {
@@ -785,10 +934,10 @@ function restoreVisibleInlineBadgesFromCache(
         }
     });
 }
+// --- END: Helper Function to Restore Badges ---
 
 
-
-
+// --- START: Main Orchestration ---
 async function main() {
   if (isMainProcessing) { return; }
   isMainProcessing = true;
@@ -866,11 +1015,12 @@ async function main() {
     }
 
     if (currentUserId) {
-        
+        // For Option A, we are now saving detailed publication ranks.
         await saveCachedData(currentUserId, rankCounts, determinedPublicationRanks);
     }
-    
-    displaySummaryPanel(rankCounts, currentUserId, determinedPublicationRanks);
+    // Pass determinedPublicationRanks so observer can be set up based on fresh results.
+    // MODIFIED: Pass Date.now() as the timestamp for fresh processing
+    displaySummaryPanel(rankCounts, currentUserId, determinedPublicationRanks, Date.now());
   } catch (error) {
       console.error("GSR: Uncaught error in main pipeline:", error);
       const statusElem = document.getElementById(STATUS_ELEMENT_ID) || createStatusElement("An error occurred.");
@@ -889,7 +1039,8 @@ async function initialLoad() {
     if (userId) {
         const cached = await loadCachedData(userId);
         if (cached && cached.publicationRanks) { // Ensure publicationRanks exists for Option A
-            displaySummaryPanel(cached.rankCounts, userId, cached.publicationRanks);
+            // MODIFIED: Pass cached.timestamp
+            displaySummaryPanel(cached.rankCounts, userId, cached.publicationRanks, cached.timestamp);
             // displaySummaryPanel will call restoreVisibleInlineBadgesFromCache and setupPublicationTableObserver
             return;
         }
@@ -906,3 +1057,4 @@ async function initialLoad() {
 if (document.getElementById('gsc_a_b') && window.location.pathname.includes("/citations")) {
     setTimeout(() => { initialLoad(); }, 500);
 }
+
