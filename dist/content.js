@@ -976,10 +976,10 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
     // Observer Setup for dynamic content (same as before)
     if (initialCachedPubRanks && initialCachedPubRanks.length > 0) {
         activeCachedPublicationRanks = initialCachedPubRanks;
-        rankMapForObserver = new Map();
+        rankMapForObserver = new Map(); // Initialized
         activeCachedPublicationRanks.forEach(pubRank => {
-            if (pubRank.titleText && pubRank.rank) {
-                rankMapForObserver.set(pubRank.titleText.trim().toLowerCase(), pubRank.rank);
+            if (pubRank.url && pubRank.rank) {
+                rankMapForObserver.set(pubRank.url, pubRank.rank); // Add '!'
             }
         });
         restoreVisibleInlineBadgesFromCache(activeCachedPublicationRanks);
@@ -1001,11 +1001,8 @@ function setupPublicationTableObserver() {
     }
     // console.log("DEBUG: setupPublicationTableObserver - Setting up observer.");
     publicationTableObserver = new MutationObserver((mutationsList, obs) => {
-        // CRITICAL CHECK: Ensure rankMapForObserver is still valid when the callback fires
         if (!activeCachedPublicationRanks || !rankMapForObserver) {
-            // console.log("DEBUG: Observer callback fired but active cache/rankMap is null. Disconnecting.");
-            obs.disconnect();
-            publicationTableObserver = null; // Explicitly clear the observer instance
+            // ...
             return;
         }
         for (const mutation of mutationsList) {
@@ -1014,14 +1011,11 @@ function setupPublicationTableObserver() {
                     if (node.nodeName === 'TR' && node.classList.contains('gsc_a_tr')) {
                         const rowElement = node;
                         const linkEl = rowElement.querySelector('td.gsc_a_t a.gsc_a_at');
-                        if (linkEl instanceof HTMLAnchorElement && linkEl.textContent) {
-                            const currentTitleText = linkEl.textContent.trim().toLowerCase();
-                            // Now that we've checked rankMapForObserver above, this access is safer.
-                            // TypeScript might still complain if it can't infer the check covers this specific line.
-                            // We can use a non-null assertion if we're confident from the logic.
-                            const cachedRank = rankMapForObserver.get(currentTitleText); // Added '!'
+                        if (linkEl instanceof HTMLAnchorElement && linkEl.href) {
+                            const currentUrl = linkEl.href;
+                            const cachedRank = rankMapForObserver.get(currentUrl); // Add '!'
                             if (cachedRank) {
-                                // console.log(`DEBUG: Observer found rank "${cachedRank}" for new row: "${currentTitleText}"`);
+                                // console.log(`DEBUG: Observer found rank "${cachedRank}" for new row with URL: "${currentUrl}"`);
                                 displayRankBadgeAfterTitle(rowElement, cachedRank);
                             }
                         }
@@ -1040,31 +1034,30 @@ function disconnectPublicationTableObserver() {
 }
 // --- END: MutationObserver Functions ---
 // --- START: Helper Function to Restore Badges for Option A (for initially visible items) ---
-function restoreVisibleInlineBadgesFromCache(cachedRanks) {
+function restoreVisibleInlineBadgesFromCache(cachedRanks // This is activeCachedPublicationRanks
+) {
     const allVisibleRows = document.querySelectorAll('tr.gsc_a_tr');
     if (allVisibleRows.length === 0 || !cachedRanks || cachedRanks.length === 0) {
         return;
     }
-    const currentRankMap = rankMapForObserver || new Map();
-    if (!rankMapForObserver && cachedRanks) {
-        cachedRanks.forEach(pubRank => {
-            if (pubRank.titleText && pubRank.rank) {
-                currentRankMap.set(pubRank.titleText.trim().toLowerCase(), pubRank.rank);
-            }
-        });
+    const currentRankMap = rankMapForObserver;
+    if (!currentRankMap) {
+        console.warn("DEBUG: restoreVisibleInlineBadgesFromCache - rankMapForObserver is not available.");
+        return; // Or build a temporary one if essential for other call paths. Given current usage, this should be fine.
     }
     let restoredCount = 0;
     allVisibleRows.forEach((row) => {
         const linkEl = row.querySelector('td.gsc_a_t a.gsc_a_at');
-        if (linkEl instanceof HTMLAnchorElement && linkEl.textContent) {
-            const currentTitleText = linkEl.textContent.trim().toLowerCase();
-            const cachedRank = currentRankMap.get(currentTitleText);
+        if (linkEl instanceof HTMLAnchorElement && linkEl.href) { // Check for href
+            const currentUrl = linkEl.href; // Use the URL as the key
+            const cachedRank = currentRankMap.get(currentUrl);
             if (cachedRank) {
                 displayRankBadgeAfterTitle(row, cachedRank);
                 restoredCount++;
             }
         }
     });
+    // console.log(`DEBUG: Restored ${restoredCount} inline badges from cache using URL keys.`);
 }
 // --- END: Helper Function to Restore Badges ---
 // --- START: Main Orchestration ---
@@ -1141,13 +1134,18 @@ async function main() {
         };
         for (let i = 0; i < publicationLinkElements.length; i += CONCURRENCY_LIMIT) {
             const chunk = publicationLinkElements.slice(i, i + CONCURRENCY_LIMIT);
-            const promises = chunk.map(pubInfo => processPublication(pubInfo).then(result => {
+            const promises = chunk.map(pubInfo => // pubInfo here has .url, .rowElement, .titleText
+             processPublication(pubInfo).then(result => {
                 rankCounts[result.rank]++;
                 displayRankBadgeAfterTitle(result.rowElement, result.rank);
-                determinedPublicationRanks.push({ titleText: result.titleText, rank: result.rank });
+                determinedPublicationRanks.push({
+                    titleText: result.titleText, // titleText from processPublication result
+                    rank: result.rank,
+                    url: pubInfo.url // url from the original pubInfo for this item
+                });
                 processedCount++;
                 updateStatusElement(statusElement, processedCount, publicationLinkElements.length);
-                return result;
+                return result; // result is { rank, rowElement, titleText }
             }));
             await Promise.all(promises);
         }
