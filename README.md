@@ -11,7 +11,7 @@ This Chrome extension enhances your Google Scholar experience by automatically f
 
 ### Why?
 
-Google Scholar is great at collecting publications but **terrible at showing the prestige of conference venues**—a crucial signal in CS and EE. This add‑on pulls the official **CORE 2023** list and surfaces each publication’s tier directly in the interface.
+Google Scholar is great at collecting publications but **terrible at showing the prestige of conference venues**—a crucial signal in CS and EE. This add‑on pulls the official **CORE 2023 (and also historical)** list and surfaces each publication’s tier directly in the interface.
 
 ---
 
