@@ -18,7 +18,6 @@ let isMainProcessing = false;
 let activeCachedPublicationRanks = null;
 let publicationTableObserver = null;
 let rankMapForObserver = null; // Maps URL to Rank
-// --- START: DBLP Constants & Globals ---
 const DBLP_API_AUTHOR_SEARCH_URL = "https://dblp.org/search/author/api";
 const DBLP_API_PERSON_PUBS_URL_PREFIX = "https://dblp.org/pid/";
 const DBLP_HEURISTIC_MIN_OVERLAP_COUNT = 2;
@@ -26,7 +25,6 @@ const DBLP_HEURISTIC_SCORE_THRESHOLD = 2.5;
 let dblpPubsForCurrentUser = [];
 let scholarUrlToDblpVenueMap = new Map();
 let scholarUrlToDblpInfoMap = new Map();
-// --- END: DBLP Constants & Globals ---
 function getScholarUserId() {
     const params = new URLSearchParams(window.location.search);
     const userId = params.get('user');
@@ -34,26 +32,17 @@ function getScholarUserId() {
 }
 function normalizeUrlForCache(url) {
     try {
-        // Ensure the URL is absolute before parsing.
-        // window.location.href provides the base if the input 'url' might be relative.
         const urlObj = new URL(url, window.location.href);
         const essentialParams = new URLSearchParams();
-        // Essential parameters for identifying a specific publication view
         if (urlObj.searchParams.has('user')) {
             essentialParams.set('user', urlObj.searchParams.get('user'));
         }
         if (urlObj.searchParams.has('citation_for_view')) {
             essentialParams.set('citation_for_view', urlObj.searchParams.get('citation_for_view'));
         }
-        // 'view_op=view_citation' is consistently part of these links
         if (urlObj.searchParams.has('view_op') && urlObj.searchParams.get('view_op') === 'view_citation') {
             essentialParams.set('view_op', 'view_citation');
         }
-        // We might also want to keep 'mauthors' if present, as it can be part of the core link
-        // to a specific version of a citation when multiple authors share a profile.
-        // However, for simplicity and based on provided examples, we'll omit it for now.
-        // If issues arise with co-authored papers from combined profiles, this could be a param to add.
-        // Sort params for extremely consistent keys.
         essentialParams.sort();
         let normalized = `${urlObj.origin}${urlObj.pathname}`;
         if (essentialParams.toString()) {
@@ -63,7 +52,6 @@ function normalizeUrlForCache(url) {
     }
     catch (e) {
         console.warn("GSR: Could not normalize URL:", url, e);
-        // Fallback: remove hash and trim (less robust but better than nothing)
         return url.split('#')[0].trim();
     }
 }
@@ -94,7 +82,6 @@ async function loadCachedData(userId) {
         }
     }
     catch (error) {
-        //console.error("DEBUG: loadCachedData - Error:", error, "Key:", cacheKey);
     }
     return null;
 }
@@ -110,11 +97,9 @@ async function saveCachedData(userId, rankCounts, publicationRanks, dblpAuthorPi
     try {
         await chrome.storage.local.set({ [cacheKey]: dataToStore });
         if (chrome.runtime.lastError) {
-            //console.error("DEBUG: saveCachedData - chrome.runtime.lastError:", chrome.runtime.lastError.message);
         }
     }
     catch (error) {
-        //console.error("DEBUG: saveCachedData - Error:", error, "Key:", cacheKey);
     }
 }
 async function clearCachedData(userId) {
@@ -127,11 +112,9 @@ async function clearCachedData(userId) {
         dblpPubsForCurrentUser = [];
         scholarUrlToDblpVenueMap.clear();
         if (chrome.runtime.lastError) {
-            //console.error("DEBUG: clearCachedData - chrome.runtime.lastError:", chrome.runtime.lastError.message);
         }
     }
     catch (error) {
-        //console.error("DEBUG: clearCachedData - Error:", error, "Key:", cacheKey);
     }
 }
 async function expandAllPublications(statusElement) {
@@ -188,7 +171,7 @@ async function expandAllPublications(statusElement) {
 function getCoreDataFileForYear(pubYear) {
     if (pubYear === null) {
         return 'core/CORE_2023.json';
-    } // Default for unknown
+    }
     if (pubYear >= 2023)
         return 'core/CORE_2023.json';
     if (pubYear >= 2021)
@@ -201,8 +184,8 @@ function getCoreDataFileForYear(pubYear) {
         return 'core/CORE_2017.json';
     if (pubYear <= 2016) {
         return 'core/CORE_2014.json';
-    } // Or a specific older one if you have it
-    return 'core/CORE_2023.json'; // Fallback
+    }
+    return 'core/CORE_2023.json';
 }
 function generateAcronymFromTitle(title) {
     if (!title)
@@ -580,18 +563,15 @@ function displayRankBadgeAfterTitle(rowElement, rank) {
     const titleCell = rowElement.querySelector('td.gsc_a_t');
     if (titleCell) {
         const oldBadge = titleCell.querySelector('span.gsr-rank-badge-inline');
-        oldBadge?.remove(); // Ensure any previous badge is cleared first
+        oldBadge?.remove();
     }
     else {
-        return; // No title cell found
+        return;
     }
-    // Original logic: if (!VALID_RANKS.includes(rank)) return;
-    // We DO want to create N/A badges if rank is "N/A" via createRankBadgeElement
-    // So, only return if createRankBadgeElement itself returns null (e.g. invalid rank string not in VALID_RANKS and not N/A)
     const titleLinkElement = rowElement.querySelector('td.gsc_a_t a.gsc_a_at');
     if (!titleLinkElement)
         return;
-    const badge = createRankBadgeElement(rank); // This can return N/A badge or null
+    const badge = createRankBadgeElement(rank);
     if (badge) {
         badge.classList.add('gsr-rank-badge-inline');
         badge.style.marginLeft = '8px';
@@ -678,8 +658,7 @@ function updateStatusElement(statusContainer, processed, total, messagePrefix) {
     if (statusText)
         statusText.textContent = `${prefix}Processing ${processed} / ${total}...`;
 }
-function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, cacheTimestamp, dblpAuthorPid // New parameter for DBLP PID
-) {
+function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, cacheTimestamp, dblpAuthorPid) {
     document.getElementById(STATUS_ELEMENT_ID)?.remove();
     document.getElementById(SUMMARY_PANEL_ID)?.remove();
     disconnectPublicationTableObserver();
@@ -838,17 +817,14 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
         dblpTimestampTextRow.style.marginBottom = '10px'; // Space before checker section's border/padding
         if (dblpAuthorPid) {
             const dblpProfileLink = document.createElement('a');
-            // Construct DBLP profile URL. Standard DBLP person pages are /pid/{pid}.html
-            // or /pers/hd/{initial}/{full_pid_path} but /pid/ is more canonical for linking.
             dblpProfileLink.href = `https://dblp.org/pid/${dblpAuthorPid}.html`;
             dblpProfileLink.target = "_blank";
             dblpProfileLink.textContent = "DBLP Profile";
             dblpProfileLink.style.textDecoration = 'none';
-            dblpProfileLink.style.color = '#007bff'; // Standard hyperlink blue
+            dblpProfileLink.style.color = '#007bff';
             dblpTimestampTextRow.appendChild(dblpProfileLink);
         }
         else {
-            // Add an empty div on the left if no DBLP link, to keep timestamp on the right
             dblpTimestampTextRow.appendChild(document.createElement('div'));
         }
         if (cacheTimestamp) {
@@ -860,7 +836,6 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
             dblpTimestampTextRow.appendChild(timestampTextElement);
         }
         else {
-            // Add an empty div on the right if DBLP link exists but no timestamp, to balance flexbox
             if (dblpAuthorPid) {
                 dblpTimestampTextRow.appendChild(document.createElement('div'));
             }
@@ -868,9 +843,7 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
         middleBarContainer.appendChild(dblpTimestampTextRow);
         panel.appendChild(middleBarContainer);
     }
-    // --- END: DBLP Link and Timestamp section ---
     const checkerSection = document.createElement('div');
-    // Adjust marginTop for checkerSection based on whether the DBLP/Timestamp section was added
     if (dblpAuthorPid || cacheTimestamp) {
         checkerSection.style.marginTop = '0px'; // The middleBarContainer provides spacing
     }
@@ -1023,12 +996,9 @@ function setupPublicationTableObserver(retryCount = 0) {
     disconnectPublicationTableObserver(); // Ensure any old one is gone
     const MAX_RETRIES = 5; // Try up to 5 times
     const RETRY_DELAY = 250; // Wait 250ms between retries
-    // console.log(`GSR OBSERVER: Attempting to setup observer (Attempt ${retryCount + 1}).`);
     const tableContainer = document.getElementById('gsc_a_b');
     if (!tableContainer) {
-        // console.warn(`GSR OBSERVER: Publication table container #gsc_a_c not found (Attempt ${retryCount + 1}).`);
         if (retryCount < MAX_RETRIES) {
-            // console.log(`GSR OBSERVER: Will retry in ${RETRY_DELAY}ms.`);
             setTimeout(() => setupPublicationTableObserver(retryCount + 1), RETRY_DELAY);
         }
         else {
@@ -1036,15 +1006,12 @@ function setupPublicationTableObserver(retryCount = 0) {
         }
         return;
     }
-    // console.log("GSR OBSERVER: #gsc_a_c found. Proceeding with observer setup.");
-    // Ensure we have rank data to apply before setting up an observer
     if (!activeCachedPublicationRanks || !rankMapForObserver || rankMapForObserver.size === 0) {
         console.warn("GSR OBSERVER: Setup aborted (at data check step), missing cached rank data or rank map is empty.");
         return;
     }
     let reapplyDebounceTimeout = null;
     publicationTableObserver = new MutationObserver((mutationsList, observerInstance) => {
-        // console.log("GSR OBSERVER: Mutation detected in table container.");
         if (!document.body.contains(tableContainer) || publicationTableObserver !== observerInstance) {
             console.warn("GSR OBSERVER: Target no longer in DOM or instance mismatch. Disconnecting this instance.");
             observerInstance.disconnect();
@@ -1057,7 +1024,6 @@ function setupPublicationTableObserver(retryCount = 0) {
             console.warn("GSR OBSERVER: Observer callback aborted, cached rank data became unavailable or empty.");
             return;
         }
-        // Check if actual publication rows were added
         let newPubRowsAdded = false;
         for (const mutation of mutationsList) {
             if (mutation.type === 'childList') {
@@ -1117,9 +1083,6 @@ function restoreVisibleInlineBadgesFromCache(cachedRanks) {
         const linkEl = rowElement.querySelector('td.gsc_a_t a.gsc_a_at');
         const existingBadge = rowElement.querySelector('span.gsr-rank-badge-inline');
         if (existingBadge) {
-            // If it already has a badge from this script, we can potentially skip it,
-            // or remove and re-add. Current logic removes and re-adds.
-            // console.log(`GSR RESTORE: Row ${index} already has a badge. It will be replaced.`);
         }
         const titleCell = rowElement.querySelector('td.gsc_a_t');
         if (titleCell) {
@@ -1144,10 +1107,6 @@ function restoreVisibleInlineBadgesFromCache(cachedRanks) {
             else {
                 if (index < 5 || index >= allVisibleRows.length - 5) { // Log misses for first/last few
                     console.warn(`GSR RESTORE (Row ${index}, Title: "${pubTitleForLog}"): Rank NOT FOUND for normalized URL "${normalizedCurrentUrl}" (from DOM URL "${currentDomUrl}")`);
-                    // One-time log of some keys from the map for comparison if it's the first few misses
-                    // if (index < 5 && !currentRankMap.has(normalizedCurrentUrl)) {
-                    //    console.log("GSR RESTORE: Sample keys from rankMap: ", Array.from(currentRankMap.keys()).slice(0, 5));
-                    // }
                 }
             }
         }
@@ -1159,18 +1118,15 @@ function restoreVisibleInlineBadgesFromCache(cachedRanks) {
     });
     console.log(`GSR RESTORE: Finished. Applied ${badgesAppliedCount} badges to ${allVisibleRows.length} visible rows.`);
 }
-// --- START: DBLP Integration Functions ---
 function getScholarAuthorName() {
     const nameElement = document.getElementById('gsc_prf_in');
     if (nameElement) {
         return nameElement.textContent?.trim() || null;
     }
-    // Fallback for potentially different DOM structures if #gsc_prf_in isn't found
     const legacyNameElement = document.querySelector('#gsc_prf_in_name_value');
     if (legacyNameElement) {
         return legacyNameElement.textContent?.trim() || null;
     }
-    // Try another common pattern if the profile header is simpler
     const h1NameElement = document.querySelector('#gs_hdr_name > a, #gs_hdr_name');
     if (h1NameElement) {
         return h1NameElement.textContent?.trim() || null;
@@ -1329,7 +1285,6 @@ async function selectBestDblpCandidateHeuristically(scholarAuthorName, scholarSa
         }
     }
     console.log("--- DBLP Heuristic Matching End ---");
-    // ... (rest of the function for threshold check and returning PID)
     if (bestCandidatePid && highestScore >= DBLP_HEURISTIC_SCORE_THRESHOLD) {
         if (statusTextEl)
             statusTextEl.textContent = `DBLP: Confidently matched PID ${bestCandidatePid} (Score: ${highestScore.toFixed(2)}).`;
@@ -1374,10 +1329,8 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
             const title = titleElement ? (titleElement.textContent || "").replace(/\.$/, '') : "";
             const yearElement = item.querySelector("year");
             const year = yearElement ? yearElement.textContent : null;
-            // --- START PAGE EXTRACTION ---
             const pagesElement = item.querySelector("pages");
             const pages = pagesElement ? (pagesElement.textContent || null) : null;
-            // --- END PAGE EXTRACTION ---
             let venue = null;
             const venueElements = ["journal", "booktitle", "series", "school"];
             for (const ve of venueElements) {
@@ -1406,21 +1359,13 @@ function getPageCountFromDblpString(pageStr) {
         return null;
     }
     pageStr = pageStr.trim();
-    // Handle article numbers like "Article 27", "23", "IV" - these are not page counts
     if (/^(article\s+\d+|\d+$|[ivxlcdm]+$)/i.test(pageStr) && !pageStr.includes('-') && !pageStr.includes(':')) {
-        // If it's just a number, it could be a single page or start page.
-        // For simplicity, if it's not a range, we can't be sure of the count.
-        // Or, assume 1 page if it's just a number like "123". Let's be conservative.
         const singleNumMatch = pageStr.match(/^(\d+)$/);
         if (singleNumMatch) {
-            // This is ambiguous. Could be page "123" (1 page) or start of many.
-            // Let's return null to indicate uncertainty for single numbers unless it's very small.
-            // if (parseInt(singleNumMatch[1],10) < 5) return 1; // Heuristic: small single number likely 1 page
             return null;
         }
-        return null; // Cannot determine count from article numbers or single Roman numerals
+        return null;
     }
-    // Handle ranges like "10-15" or "S10-S15"
     let match = pageStr.match(/^(?:[a-z\d]+:)?(\d+)\s*-\s*(?:[a-z\d]+:)?(\d+)$/i); // Supports "section:start-section:end" or just "start-end"
     if (match) {
         const start = parseInt(match[1], 10);
@@ -1429,8 +1374,6 @@ function getPageCountFromDblpString(pageStr) {
             return end - start + 1;
         }
     }
-    // Handle electronic journal pages like "25:1-25:10" or "1-10" (within an article number context)
-    // This pattern is similar to the one above but allows for the colon prefix on both sides.
     match = pageStr.match(/^(?:(\d+):)?(\d+)\s*-\s*(?:(\d+):)?(\d+)$/i);
     if (match) {
         const prefix1 = match[1]; // e.g. "25" in "25:1"
@@ -1438,24 +1381,15 @@ function getPageCountFromDblpString(pageStr) {
         const prefix2 = match[3]; // e.g. "25" in "25:10"
         const endPage = parseInt(match[4], 10);
         if (!isNaN(startPage) && !isNaN(endPage) && endPage >= startPage) {
-            // If prefixes exist and are different, it's complex (e.g., 25:8-26:2).
-            // For simplicity, if prefixes are the same or only one side has a prefix,
-            // or no prefixes, calculate simple page diff.
             if (prefix1 === undefined && prefix2 === undefined) { // e.g. "1-10"
                 return endPage - startPage + 1;
             }
             if (prefix1 && prefix2 && prefix1 === prefix2) { // e.g. "25:1-25:10"
                 return endPage - startPage + 1;
             }
-            // More complex cases like "10:S1-10:S5" or cross-section ranges are harder to generalize
-            // For now, if prefixes differ or are one-sided with a range, we might still get a valid count
-            // if the simple start-end logic makes sense.
-            // If only end has prefix, it's odd. If only start has prefix, it's also odd for standard ranges.
-            // This simplified logic might misinterpret some complex cases, but covers common ones.
             return endPage - startPage + 1;
         }
     }
-    // If no specific format matched, we can't determine a reliable count.
     return null;
 }
 async function buildDblpInfoMap(scholarPubLinkElements, dblpPublications, 
@@ -1497,8 +1431,6 @@ mapToFill, statusElement) {
     if (statusTextEl && mappedCount > 0)
         statusTextEl.textContent = `DBLP: Mapped ${mappedCount} publication details.`;
 }
-// --- END: DBLP Integration Functions ---
-// --- START: Main Orchestration ---
 async function main() {
     if (isMainProcessing) {
         return;
@@ -1667,8 +1599,6 @@ async function main() {
                     }
                     // --- End DBLP-based ranking logic ---
                 }
-                // If no dblpInfo (i.e., this Scholar URL did not map to any DBLP entry),
-                // currentRank remains "N/A". No fallback to Scholar-scraped venue in this logic.
             }
             catch (error) {
                 console.warn(`GSR Error processing publication (URL: ${pubInfo.url}, Title: "${pubInfo.titleText.substring(0, 50)}..."):`, error);
@@ -1777,8 +1707,6 @@ function attemptPageInitialization() {
                 pageInitializationObserver = null;
                 // console.log("GSR: Page content observer disconnected.");
             }
-            // Use a timeout before calling executeInitialLoad, similar to the original script's delay.
-            // This gives a brief moment for Google Scholar to settle its DOM after #gsc_a_b appears.
             setTimeout(executeInitialLoad, 500);
             return true; // Initialization has been scheduled
         }
@@ -1797,21 +1725,13 @@ function attemptPageInitialization() {
     }
     return false; // Conditions to start initialization were not met
 }
-// Try to initialize immediately when the script loads.
-// This handles cases where the page is already fully loaded.
 if (!attemptPageInitialization()) {
     // console.log("GSR: Initial attemptPageInitialization failed. Setting up MutationObserver to wait for #gsc_a_b.");
     pageInitializationObserver = new MutationObserver((mutationsList, observer) => {
         // console.log("GSR: Page observer detected DOM mutation.");
         if (attemptPageInitialization()) {
-            // If attemptPageInitialization returns true, it means it either scheduled the load
-            // or determined it was already handled/processing. The observer can be stopped.
-            // Disconnection is handled within attemptPageInitialization if #gsc_a_b is found.
         }
     });
-    // Observe the document for changes, waiting for #gsc_a_b to appear.
-    // Start observing once the DOM is minimally ready. For content scripts,
-    // document.documentElement should be available at `document_idle`.
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", () => {
             if (document.documentElement && pageInitializationObserver) { // Check observer still exists
@@ -1824,7 +1744,6 @@ if (!attemptPageInitialization()) {
             pageInitializationObserver.observe(document.documentElement, { childList: true, subtree: true });
         }
     }
-    // Safety timeout: if #gsc_a_b doesn't appear after a while, stop observing to prevent issues.
     setTimeout(() => {
         if (pageInitializationObserver) {
             pageInitializationObserver.disconnect();
