@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Google Scholar Conference Ranker",
-  "description": "Classifies conferences on Google Scholar profiles using CORE current and historic rankings and shows a summary panel.",
-  "version": "1.0.0", 
+  "description": "Classifies conferences on Google Scholar profiles using CORE current and historic rankings. Integrates DBLP for improved accuracy.",
+  "version": "1.0.1",
   "permissions": [
-    "storage" 
+    "storage"
   ],
   "content_scripts": [
     {
@@ -56,8 +56,8 @@
         "https://scholar.google.pt/*",
         "https://scholar.google.ro/*",
         "https://scholar.google.ru/*",
-        "https://scholar.google.se/*", 
-        "https://scholar.google.sg/*",
+        "https://scholar.google.se/*",
+        "https://scholar.google.sg/*", 
         "https://scholar.google.si/*",
         "https://scholar.google.sk/*",
         "https://scholar.google.ua/*",
@@ -117,11 +117,12 @@
     "https://scholar.google.ro/*",
     "https://scholar.google.ru/*",
     "https://scholar.google.se/*",
-    "https://scholar.google.sg/*",
+    "https://scholar.google.sg/*", 
     "https://scholar.google.si/*",
     "https://scholar.google.sk/*",
     "https://scholar.google.ua/*",
-    "https://scholar.google.us/*"
+    "https://scholar.google.us/*",
+    "https://dblp.org/*"  
   ],
 
   "web_accessible_resources": [
@@ -134,7 +135,7 @@
       "core/CORE_2021.json",
       "core/CORE_2023.json"
     ],
-      "matches": [
+      "matches": [ 
         "https://scholar.google.com/*",
         "https://scholar.google.co.uk/*",
         "https://scholar.google.co.jp/*",
