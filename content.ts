@@ -1540,10 +1540,18 @@ async function buildDblpInfoMap(
 
     let mappedCount = 0;
     for (const scholarPub of scholarPubLinkElements) {
-        const cleanScholarTitle = scholarPub.titleText; // Already lowercased & trimmed
+        const cleanScholarTitle = cleanTextForComparison(scholarPub.titleText);
         for (const dblpPub of dblpPublications) {
             const cleanDblpTitle = cleanTextForComparison(dblpPub.title.toLowerCase());
             const titleSimilarity = jaroWinkler(cleanScholarTitle, cleanDblpTitle);
+			
+			// inside buildDblpInfoMap(), just before the `if (titleSimilarity > 0.90)` line
+console.log(
+  '[SIM]', titleSimilarity.toFixed(3),
+  '\n   GS :', scholarPub.titleText,
+  '\n   DBLP:', cleanDblpTitle
+);
+
 
             if (titleSimilarity > 0.90) { // Threshold for title match
                 let yearMatch = false;
@@ -1559,7 +1567,9 @@ async function buildDblpInfoMap(
                 // but dblpKey should always exist for a valid DBLP entry.
                 if (yearMatch && dblpPub.dblpKey) { 
                     const pageCount = getPageCountFromDblpString(dblpPub.pages);
-                    // MODIFIED: Store venue_full and acronym from dblpPub
+                    
+		        
+					
                     mapToFill.set(scholarPub.url, { 
                         venue: dblpPub.venue, 
                         pageCount: pageCount, 
@@ -1567,6 +1577,9 @@ async function buildDblpInfoMap(
                         venue_full: dblpPub.venue_full, // Store full venue title from stream
                         acronym: dblpPub.acronym       // Store acronym from stream
                     });
+					
+					
+					
                     mappedCount++;
                     break; 
                 }
