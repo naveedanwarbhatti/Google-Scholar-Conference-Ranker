@@ -1546,11 +1546,7 @@ async function buildDblpInfoMap(
             const titleSimilarity = jaroWinkler(cleanScholarTitle, cleanDblpTitle);
 			
 			// inside buildDblpInfoMap(), just before the `if (titleSimilarity > 0.90)` line
-console.log(
-  '[SIM]', titleSimilarity.toFixed(3),
-  '\n   GS :', scholarPub.titleText,
-  '\n   DBLP:', cleanDblpTitle
-);
+
 
 
             if (titleSimilarity > 0.90) { // Threshold for title match
