@@ -1,16 +1,27 @@
 {
   "name": "scholar-ranker",
   "version": "1.0.0",
+  "description": "Google-Scholar Conference Ranker – local dev build",
+  "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "clean": "rimraf build",
+    "build": "npm run clean && tsc -p tsconfig.build.json && npm run copy-assets",
+    "copy-assets": "cpx \"manifest.json\" build && cpx \"{core/**/*,icons/**/*,images/**/*}\" build",
+    "zip": "cd build && zip -r ../ranker.zip .",
+    "e2e": "npm run build && playwright test",
+    "test": "echo \"No unit tests yet – run: npm run e2e\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
   "devDependencies": {
+    "@playwright/test": "^1.44.0",
     "@types/chrome": "^0.0.322",
+    "@types/node": "^20.11.17",
+    "copyfiles": "^2.4.1",
+    "cpx": "^1.5.0",
+    "rimraf": "^5.0.5",
     "typescript": "^5.8.3"
   }
 }

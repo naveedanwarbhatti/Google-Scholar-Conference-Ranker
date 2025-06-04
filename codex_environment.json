@@ -1,0 +1,29 @@
+{
+  "description": "Google-Scholar Conference Ranker – build, zip and end-to-end test",
+  "working_directory": "/workspace",                 /* repo root in the sandbox */
+  "command_prefix": "bash -lc",
+  "timeout": 600000,                                 /* 10 minutes max per cmd */
+
+  "setup_commands": [
+    /* ─────────── OS packages ─────────── */
+    "apt-get update",
+    "apt-get install -y curl git zip",
+
+    /* ─────────── Node.js 18 LTS ───────── */
+    "curl -fsSL https://deb.nodesource.com/setup_18.x | bash -",
+    "apt-get install -y nodejs",
+
+    /* ─────────── Project deps ─────────── */
+    "npm ci",
+
+    /* ─────────── Playwright browser ───── */
+    "npx playwright install chromium"
+  ],
+
+  "commands": {
+    "clean": "npm run clean",        /* wipes ./build (rarely needed directly) */
+    "build": "npm run build",        /* TypeScript → ./build/                  */
+    "zip":   "npm run zip",          /* creates ranker.zip inside repo root    */
+    "e2e":   "npm run e2e"           /* build + Playwright test suite          */
+  }
+}
