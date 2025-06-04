@@ -50,13 +50,37 @@ interface ScholarSamplePublication {
 // --- END: DBLP Integration Interfaces ---
 
 interface CachedProfileData {
-    rankCounts: Record<string, number>;
-    publicationRanks: PublicationRankInfo[];
-    timestamp: number; // Timestamp for rank calculation
-    dblpAuthorPid?: string | null;     // The extracted PID used for fetching pubs
-    dblpProfileUrl?: string | null;    // The full URL to the DBLP author's page
-    dblpMatchTimestamp?: number;
+  rankCounts: Record<string, number>;
+  publicationRanks: RankMap;              // <── was PublicationRankInfo[]
+  timestamp: number;
+  dblpAuthorPid?: string | null;
+  dblpProfileUrl?: string | null;
+  dblpMatchTimestamp?: number;
 }
+
+
+/** ----------  Compact cache format  ---------- */
+type RankMap = Record<string, "A*" | "A" | "B" | "C" | "N/A">;
+
+/** array → map */
+function packRanks(arr: PublicationRankInfo[]): RankMap {
+  const obj: RankMap = {};
+  for (const { url, rank } of arr) obj[url] = rank as RankMap[string];
+  return obj;
+}
+
+/** map → array (titleText stays empty – it is never used after load) */
+function unpackRanks(map: RankMap): PublicationRankInfo[] {
+  return Object.entries(map).map(([url, rank]) => ({
+    url,
+    rank,
+    titleText: ""
+  }));
+}
+
+
+
+
 
 const VALID_RANKS: string[] = ["A*", "A", "B", "C"]; // Added string[] type
 const IGNORE_KEYWORDS: string[] = [ // Explicitly typed and filled
@@ -69,8 +93,8 @@ const IGNORE_KEYWORDS: string[] = [ // Explicitly typed and filled
 const STATUS_ELEMENT_ID = 'scholar-ranker-status-progress';
 const SUMMARY_PANEL_ID = 'scholar-ranker-summary';
 const CACHE_PREFIX = 'scholarRanker_profile_';
-const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
-const DBLP_CACHE_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days for DBLP PID
+const CACHE_DURATION_MS = Number.POSITIVE_INFINITY;   // never expires
+const DBLP_CACHE_DURATION_MS = Number.POSITIVE_INFINITY;   // never expires
 
 console.log("Google Scholar Ranker: Content script loaded (vDBLP_Auto_Integration_Fix1).");
 
@@ -84,8 +108,6 @@ let rankMapForObserver: Map<string, string> | null = null; // Maps URL to Rank
 // --- START: DBLP Constants & Globals ---
 const DBLP_API_AUTHOR_SEARCH_URL = "https://dblp.org/search/author/api";
 const DBLP_API_PERSON_PUBS_URL_PREFIX = "https://dblp.org/pid/";
-const DBLP_SPARQL_ENDPOINT = "https://dblp.org/sparql";
-const USE_SPARQL = true;
 const DBLP_HEURISTIC_MIN_OVERLAP_COUNT = 2;
 const DBLP_HEURISTIC_SCORE_THRESHOLD = 2.5;
 let dblpPubsForCurrentUser: DblpPublicationEntry[] = [];
@@ -95,36 +117,45 @@ let scholarUrlToDblpInfoMap = new Map<string, { venue: string | null; pageCount:
 // --- END: DBLP Constants & Globals ---
 
 
-async function fetchDblpStreamMetadata(streamXmlUrl: string): Promise<{ acronym: string | null; title: string | null } | null> {
-    try {
-        const response = await fetch(streamXmlUrl);
-        if (!response.ok) {
-            console.warn(`DBLP Stream: Fetching metadata failed for "${streamXmlUrl}": ${response.statusText} (Status: ${response.status})`);
-            return null;
-        }
-        const xmlText = await response.text();
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+/** --------  STREAM-XML memo cache  -------- */
+const streamMetaCache = new Map<
+  string,                                              // streamId e.g. "buildsys"
+  Promise<{ acronym: string|null; title: string|null } | null>
+>();
 
-        const errorNode = xmlDoc.querySelector("parsererror");
-        if (errorNode) {
-            console.error("DBLP Stream: Error parsing XML for stream", streamXmlUrl, errorNode.textContent);
-            return null;
-        }
+/** --------  REPLACE the old fetchDblpStreamMetadata  -------- */
+async function fetchDblpStreamMetadata(
+  streamXmlUrl: string
+): Promise<{ acronym: string | null; title: string | null } | null> {
 
-        const confElement = xmlDoc.querySelector("dblpstreams > conf");
-        if (confElement) {
-            const acronym = confElement.querySelector("acronym")?.textContent?.trim() || null;
-            const title = confElement.querySelector("title")?.textContent?.trim() || null;
-            return { acronym, title };
-        } else {
-            console.warn(`DBLP Stream: Could not find <conf> element in ${streamXmlUrl}`);
-        }
-    } catch (error) {
-        console.error(`DBLP Stream: Error fetching or parsing stream metadata from ${streamXmlUrl}:`, error);
-    }
-    return null;
+  // extract "buildsys" from https://dblp.org/streams/conf/buildsys.xml
+  const streamId = streamXmlUrl.match(/\/conf\/([^/]+)\.xml$/)?.[1];
+  if (!streamId) return null;           // malformed url – fall back to previous behaviour
+
+  if (!streamMetaCache.has(streamId)) {
+    streamMetaCache.set(streamId, (async () => {
+      try {
+        const resp = await fetch(streamXmlUrl);
+        if (!resp.ok) return null;
+
+        const xml   = await resp.text();
+        const doc   = new DOMParser().parseFromString(xml, "application/xml");
+        if (doc.querySelector("parsererror")) return null;
+
+        const conf  = doc.querySelector("dblpstreams > conf");
+        return conf
+          ? {
+              acronym: conf.querySelector("acronym")?.textContent?.trim() ?? null,
+              title  : conf.querySelector("title")?.textContent?.trim()   ?? null,
+            }
+          : null;
+      } catch { return null; }
+    })());
+  }
+
+  return streamMetaCache.get(streamId)!;
 }
+
 
 
 
@@ -187,15 +218,7 @@ async function loadCachedData(userId: string): Promise<CachedProfileData | null>
         if (result && result[cacheKey]) {
             const data = result[cacheKey] as CachedProfileData;
             const timeSinceCache = Date.now() - data.timestamp;
-            if (timeSinceCache < CACHE_DURATION_MS) {
-                if (Array.isArray(data.publicationRanks) && typeof data.rankCounts === 'object') {
-                    return data;
-                } else {
-                    await chrome.storage.local.remove(cacheKey);
-                }
-            } else {
-                await chrome.storage.local.remove(cacheKey);
-            }
+            return data;
         }
     } catch (error) {
         //console.error("DEBUG: loadCachedData - Error:", error, "Key:", cacheKey);
@@ -212,7 +235,7 @@ async function saveCachedData(
     const cacheKey = getCacheKey(userId);
     const dataToStore: CachedProfileData = {
         rankCounts,
-        publicationRanks,
+        publicationRanks: packRanks(publicationRanks),
         timestamp: Date.now(),
         dblpAuthorPid: dblpAuthorPid || undefined,
         dblpMatchTimestamp: dblpAuthorPid ? Date.now() : undefined
@@ -1221,38 +1244,6 @@ async function searchDblpForAuthor(authorName: string, statusElement?: HTMLEleme
     return [];
 }
 
-function escapeSparqlLiteral(str: string): string {
-    return str.replace(/[\\"]/g, s => "\\" + s);
-}
-
-async function runSparqlQuery(query: string): Promise<any> {
-    const url = new URL(DBLP_SPARQL_ENDPOINT);
-    url.searchParams.set('query', query);
-    url.searchParams.set('format', 'json');
-    const resp = await fetch(url.toString());
-    if (!resp.ok) throw new Error('SPARQL query failed: ' + resp.statusText);
-    return resp.json();
-}
-
-async function searchDblpForAuthorSparql(authorName: string, statusElement?: HTMLElement): Promise<DblpAuthorSearchResultHit[]> {
-    const statusTextEl = statusElement?.querySelector('.gsr-status-text') as HTMLElement | null;
-    if (statusTextEl) statusTextEl.textContent = `DBLP: Searching (SPARQL) for "${authorName}"...`;
-    const q = `SELECT ?pid ?url ?name WHERE { ?person a foaf:Person ; foaf:name ?name ; dblp:primaryKey ?pid ; rdfs:seeAlso ?url . FILTER(CONTAINS(LCASE(?name), LCASE("${escapeSparqlLiteral(authorName)}"))) } LIMIT 10`;
-    try {
-        const data = await runSparqlQuery(q);
-        const hits: DblpAuthorSearchResultHit[] = [];
-        for (const b of (data.results?.bindings ?? [])) {
-            hits.push({ info: { author: b.name.value, url: b.url.value } });
-        }
-        if (statusTextEl) statusTextEl.textContent = `DBLP SPARQL: Found ${hits.length} potential author(s).`;
-        return hits;
-    } catch (err) {
-        console.error('DBLP SPARQL: error searching author', err);
-        if (statusTextEl) statusTextEl.textContent = 'DBLP SPARQL search error.';
-        return [];
-    }
-}
-
 function extractPidFromDblpUrl(dblpAuthorUrl: string): string | null {
     const matchPers = dblpAuthorUrl.match(/dblp\.org\/pers\/hd\/[a-z0-9]\/([^.]+)/i);
     if (matchPers && matchPers[1]) {
@@ -1330,9 +1321,7 @@ async function selectBestDblpCandidateHeuristically(
         if (statusTextEl) statusTextEl.textContent = `DBLP: Verifying "${candidateDblpName}" (PID: ${candidatePid})... (${index + 1}/${dblpCandidates.length})`;
         console.log(`  Fetching full publications for DBLP PID: ${candidatePid} (Author: "${candidateDblpName}")`);
         
-        const candidateFullDblpPubs = USE_SPARQL
-            ? await fetchPublicationsFromDblpSparql(candidatePid, undefined)
-            : await fetchPublicationsFromDblp(candidatePid, undefined);
+        const candidateFullDblpPubs = await fetchPublicationsFromDblp(candidatePid, undefined); 
         console.log(`  Fetched ${candidateFullDblpPubs.length} DBLP publications for PID ${candidatePid}. First 3:`, candidateFullDblpPubs.slice(0,3).map(p => ({title: p.title.substring(0,50)+"...", venue: p.venue, year: p.year })));
 
         let overlapCount = 0;
@@ -1494,33 +1483,6 @@ async function fetchPublicationsFromDblp(
   return publications;
 }
 
-async function fetchPublicationsFromDblpSparql(
-  authorPidPath: string,
-  statusElement?: HTMLElement
-): Promise<DblpPublicationEntry[]> {
-  const statusTextEl = statusElement?.querySelector('.gsr-status-text') as HTMLElement | null;
-  if (statusTextEl) statusTextEl.textContent = `DBLP SPARQL: Fetching publications for PID ${authorPidPath}…`;
-  const q = `SELECT ?key ?title ?venue ?year WHERE { ?pub dblp:author <https://dblp.org/pid/${authorPidPath}> ; dblp:primaryKey ?key ; rdfs:label ?title . OPTIONAL { ?pub dblp:publishedIn ?v . ?v rdfs:label ?venue } OPTIONAL { ?pub dcterms:issued ?year } }`;
-  try {
-    const data = await runSparqlQuery(q);
-    const pubs: DblpPublicationEntry[] = [];
-    for (const b of (data.results?.bindings ?? [])) {
-      pubs.push({
-        dblpKey: b.key.value,
-        title: b.title.value,
-        venue: b.venue ? b.venue.value : null,
-        year: b.year ? b.year.value : null,
-      });
-    }
-    if (statusTextEl) statusTextEl.textContent = `DBLP SPARQL: fetched ${pubs.length} publications.`;
-    return pubs;
-  } catch (err) {
-    console.error('DBLP SPARQL: error fetching pubs', err);
-    if (statusTextEl) statusTextEl.textContent = 'DBLP SPARQL fetch error.';
-    return [];
-  }
-}
-
 
 function getPageCountFromDblpString(pageStr: string | null | undefined): number | null {
     if (!pageStr) {
@@ -1609,7 +1571,11 @@ async function buildDblpInfoMap(
             const titleSimilarity = jaroWinkler(cleanScholarTitle, cleanDblpTitle);
 			
 			// inside buildDblpInfoMap(), just before the `if (titleSimilarity > 0.90)` line
-
+console.log(
+  '[SIM]', titleSimilarity.toFixed(3),
+  '\n   GS :', scholarPub.titleText,
+  '\n   DBLP:', cleanDblpTitle
+);
 
 
             if (titleSimilarity > 0.90) { // Threshold for title match
@@ -1694,9 +1660,7 @@ async function main() {
                 if (statusTextElement) statusTextElement.textContent = `DBLP: Searching for ${scholarAuthorName}...`;
                 const scholarSamplePubs = getScholarSamplePublications(7);
                 if (scholarSamplePubs.length >= DBLP_HEURISTIC_MIN_OVERLAP_COUNT) {
-                    const dblpCandidates = USE_SPARQL
-                        ? await searchDblpForAuthorSparql(scholarAuthorName, statusElement)
-                        : await searchDblpForAuthor(scholarAuthorName, statusElement);
+                    const dblpCandidates = await searchDblpForAuthor(scholarAuthorName, statusElement);
                     if (dblpCandidates.length > 0) {
                         cachedDblpPidForSave = await selectBestDblpCandidateHeuristically(
                             scholarAuthorName, scholarSamplePubs, dblpCandidates, statusElement
@@ -1710,9 +1674,7 @@ async function main() {
             }
             if (cachedDblpPidForSave) {
                 if (statusTextElement && dblpPubsForCurrentUser.length === 0) statusTextElement.textContent = `DBLP: Fetching publications for PID ${cachedDblpPidForSave}...`;
-                dblpPubsForCurrentUser = USE_SPARQL
-                    ? await fetchPublicationsFromDblpSparql(cachedDblpPidForSave, statusElement)
-                    : await fetchPublicationsFromDblp(cachedDblpPidForSave, statusElement);
+                dblpPubsForCurrentUser = await fetchPublicationsFromDblp(cachedDblpPidForSave, statusElement);
             } else {
                  if (statusTextElement && scholarAuthorName) statusTextElement.textContent = "DBLP: Could not match author. Ranking may be limited.";
                  await new Promise(resolve => setTimeout(resolve, 1500));
@@ -1926,7 +1888,9 @@ async function initialLoad() {
         const cached = await loadCachedData(userId);
         if (cached && cached.publicationRanks) {
             // Pass cached.dblpAuthorPid to displaySummaryPanel
-            displaySummaryPanel(cached.rankCounts, userId, cached.publicationRanks, cached.timestamp, cached.dblpAuthorPid);
+			const pubRanksArr = unpackRanks(cached.publicationRanks);
+
+            displaySummaryPanel(cached.rankCounts, userId, pubRanksArr, cached.timestamp, cached.dblpAuthorPid);
             return;
         }
     }
