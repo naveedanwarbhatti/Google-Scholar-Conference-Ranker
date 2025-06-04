@@ -1,20 +1,5 @@
 "use strict";
 // scholar-ranker/content.ts
-/** array → map */
-function packRanks(arr) {
-    const obj = {};
-    for (const { url, rank } of arr)
-        obj[url] = rank;
-    return obj;
-}
-/** map → array (titleText stays empty – it is never used after load) */
-function unpackRanks(map) {
-    return Object.entries(map).map(([url, rank]) => ({
-        url,
-        rank,
-        titleText: ""
-    }));
-}
 const VALID_RANKS = ["A*", "A", "B", "C"]; // Added string[] type
 const IGNORE_KEYWORDS = [
     "workshop", "transactions", "journal", "poster", "demo", "abstract",
@@ -25,8 +10,8 @@ const IGNORE_KEYWORDS = [
 const STATUS_ELEMENT_ID = 'scholar-ranker-status-progress';
 const SUMMARY_PANEL_ID = 'scholar-ranker-summary';
 const CACHE_PREFIX = 'scholarRanker_profile_';
-const CACHE_DURATION_MS = Number.POSITIVE_INFINITY; // never expires
-const DBLP_CACHE_DURATION_MS = Number.POSITIVE_INFINITY; // never expires
+const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+const DBLP_CACHE_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days for DBLP PID
 console.log("Google Scholar Ranker: Content script loaded (vDBLP_Auto_Integration_Fix1).");
 const coreDataCache = {};
 let isMainProcessing = false;
@@ -44,38 +29,35 @@ let dblpPubsForCurrentUser = [];
 let scholarUrlToDblpVenueMap = new Map();
 let scholarUrlToDblpInfoMap = new Map();
 // --- END: DBLP Constants & Globals ---
-/** --------  STREAM-XML memo cache  -------- */
-const streamMetaCache = new Map();
-/** --------  REPLACE the old fetchDblpStreamMetadata  -------- */
 async function fetchDblpStreamMetadata(streamXmlUrl) {
-    // extract "buildsys" from https://dblp.org/streams/conf/buildsys.xml
-    const streamId = streamXmlUrl.match(/\/conf\/([^/]+)\.xml$/)?.[1];
-    if (!streamId)
-        return null; // malformed url – fall back to previous behaviour
-    if (!streamMetaCache.has(streamId)) {
-        streamMetaCache.set(streamId, (async () => {
-            try {
-                const resp = await fetch(streamXmlUrl);
-                if (!resp.ok)
-                    return null;
-                const xml = await resp.text();
-                const doc = new DOMParser().parseFromString(xml, "application/xml");
-                if (doc.querySelector("parsererror"))
-                    return null;
-                const conf = doc.querySelector("dblpstreams > conf");
-                return conf
-                    ? {
-                        acronym: conf.querySelector("acronym")?.textContent?.trim() ?? null,
-                        title: conf.querySelector("title")?.textContent?.trim() ?? null,
-                    }
-                    : null;
-            }
-            catch {
-                return null;
-            }
-        })());
+    try {
+        const response = await fetch(streamXmlUrl);
+        if (!response.ok) {
+            console.warn(`DBLP Stream: Fetching metadata failed for "${streamXmlUrl}": ${response.statusText} (Status: ${response.status})`);
+            return null;
+        }
+        const xmlText = await response.text();
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+        const errorNode = xmlDoc.querySelector("parsererror");
+        if (errorNode) {
+            console.error("DBLP Stream: Error parsing XML for stream", streamXmlUrl, errorNode.textContent);
+            return null;
+        }
+        const confElement = xmlDoc.querySelector("dblpstreams > conf");
+        if (confElement) {
+            const acronym = confElement.querySelector("acronym")?.textContent?.trim() || null;
+            const title = confElement.querySelector("title")?.textContent?.trim() || null;
+            return { acronym, title };
+        }
+        else {
+            console.warn(`DBLP Stream: Could not find <conf> element in ${streamXmlUrl}`);
+        }
     }
-    return streamMetaCache.get(streamId);
+    catch (error) {
+        console.error(`DBLP Stream: Error fetching or parsing stream metadata from ${streamXmlUrl}:`, error);
+    }
+    return null;
 }
 function getScholarUserId() {
     const params = new URLSearchParams(window.location.search);
@@ -130,7 +112,17 @@ async function loadCachedData(userId) {
         if (result && result[cacheKey]) {
             const data = result[cacheKey];
             const timeSinceCache = Date.now() - data.timestamp;
-            return data;
+            if (timeSinceCache < CACHE_DURATION_MS) {
+                if (Array.isArray(data.publicationRanks) && typeof data.rankCounts === 'object') {
+                    return data;
+                }
+                else {
+                    await chrome.storage.local.remove(cacheKey);
+                }
+            }
+            else {
+                await chrome.storage.local.remove(cacheKey);
+            }
         }
     }
     catch (error) {
@@ -142,7 +134,7 @@ async function saveCachedData(userId, rankCounts, publicationRanks, dblpAuthorPi
     const cacheKey = getCacheKey(userId);
     const dataToStore = {
         rankCounts,
-        publicationRanks: packRanks(publicationRanks),
+        publicationRanks,
         timestamp: Date.now(),
         dblpAuthorPid: dblpAuthorPid || undefined,
         dblpMatchTimestamp: dblpAuthorPid ? Date.now() : undefined
@@ -1647,7 +1639,6 @@ mapToFill, statusElement) {
             const cleanDblpTitle = cleanTextForComparison(dblpPub.title.toLowerCase());
             const titleSimilarity = jaroWinkler(cleanScholarTitle, cleanDblpTitle);
             // inside buildDblpInfoMap(), just before the `if (titleSimilarity > 0.90)` line
-            console.log('[SIM]', titleSimilarity.toFixed(3), '\n   GS :', scholarPub.titleText, '\n   DBLP:', cleanDblpTitle);
             if (titleSimilarity > 0.90) { // Threshold for title match
                 let yearMatch = false;
                 if (scholarPub.yearFromProfile && dblpPub.year) {
@@ -1938,8 +1929,7 @@ async function initialLoad() {
         const cached = await loadCachedData(userId);
         if (cached && cached.publicationRanks) {
             // Pass cached.dblpAuthorPid to displaySummaryPanel
-            const pubRanksArr = unpackRanks(cached.publicationRanks);
-            displaySummaryPanel(cached.rankCounts, userId, pubRanksArr, cached.timestamp, cached.dblpAuthorPid);
+            displaySummaryPanel(cached.rankCounts, userId, cached.publicationRanks, cached.timestamp, cached.dblpAuthorPid);
             return;
         }
     }
