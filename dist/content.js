@@ -36,6 +36,8 @@ let rankMapForObserver = null; // Maps URL to Rank
 // --- START: DBLP Constants & Globals ---
 const DBLP_API_AUTHOR_SEARCH_URL = "https://dblp.org/search/author/api";
 const DBLP_API_PERSON_PUBS_URL_PREFIX = "https://dblp.org/pid/";
+const DBLP_SPARQL_ENDPOINT = "https://dblp.org/sparql";
+const USE_SPARQL = true;
 const DBLP_HEURISTIC_MIN_OVERLAP_COUNT = 2;
 const DBLP_HEURISTIC_SCORE_THRESHOLD = 2.5;
 let dblpPubsForCurrentUser = [];
@@ -1313,6 +1315,40 @@ async function searchDblpForAuthor(authorName, statusElement) {
         statusTextEl.textContent = `DBLP: No results or error for "${authorName}".`;
     return [];
 }
+function escapeSparqlLiteral(str) {
+    return str.replace(/[\\"]/g, s => "\\" + s);
+}
+async function runSparqlQuery(query) {
+    const url = new URL(DBLP_SPARQL_ENDPOINT);
+    url.searchParams.set('query', query);
+    url.searchParams.set('format', 'json');
+    const resp = await fetch(url.toString());
+    if (!resp.ok)
+        throw new Error('SPARQL query failed: ' + resp.statusText);
+    return resp.json();
+}
+async function searchDblpForAuthorSparql(authorName, statusElement) {
+    const statusTextEl = statusElement?.querySelector('.gsr-status-text');
+    if (statusTextEl)
+        statusTextEl.textContent = `DBLP: Searching (SPARQL) for "${authorName}"...`;
+    const q = `SELECT ?pid ?url ?name WHERE { ?person a foaf:Person ; foaf:name ?name ; dblp:primaryKey ?pid ; rdfs:seeAlso ?url . FILTER(CONTAINS(LCASE(?name), LCASE("${escapeSparqlLiteral(authorName)}"))) } LIMIT 10`;
+    try {
+        const data = await runSparqlQuery(q);
+        const hits = [];
+        for (const b of (data.results?.bindings ?? [])) {
+            hits.push({ info: { author: b.name.value, url: b.url.value } });
+        }
+        if (statusTextEl)
+            statusTextEl.textContent = `DBLP SPARQL: Found ${hits.length} potential author(s).`;
+        return hits;
+    }
+    catch (err) {
+        console.error('DBLP SPARQL: error searching author', err);
+        if (statusTextEl)
+            statusTextEl.textContent = 'DBLP SPARQL search error.';
+        return [];
+    }
+}
 function extractPidFromDblpUrl(dblpAuthorUrl) {
     const matchPers = dblpAuthorUrl.match(/dblp\.org\/pers\/hd\/[a-z0-9]\/([^.]+)/i);
     if (matchPers && matchPers[1]) {
@@ -1373,7 +1409,9 @@ async function selectBestDblpCandidateHeuristically(scholarAuthorName, scholarSa
         if (statusTextEl)
             statusTextEl.textContent = `DBLP: Verifying "${candidateDblpName}" (PID: ${candidatePid})... (${index + 1}/${dblpCandidates.length})`;
         console.log(`  Fetching full publications for DBLP PID: ${candidatePid} (Author: "${candidateDblpName}")`);
-        const candidateFullDblpPubs = await fetchPublicationsFromDblp(candidatePid, undefined);
+        const candidateFullDblpPubs = USE_SPARQL
+            ? await fetchPublicationsFromDblpSparql(candidatePid, undefined)
+            : await fetchPublicationsFromDblp(candidatePid, undefined);
         console.log(`  Fetched ${candidateFullDblpPubs.length} DBLP publications for PID ${candidatePid}. First 3:`, candidateFullDblpPubs.slice(0, 3).map(p => ({ title: p.title.substring(0, 50) + "...", venue: p.venue, year: p.year })));
         let overlapCount = 0;
         let publicationMatchScoreContribution = 0;
@@ -1509,6 +1547,33 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
             statusTextEl.textContent = "DBLP: Error fetching pubs.";
     }
     return publications;
+}
+async function fetchPublicationsFromDblpSparql(authorPidPath, statusElement) {
+    const statusTextEl = statusElement?.querySelector('.gsr-status-text');
+    if (statusTextEl)
+        statusTextEl.textContent = `DBLP SPARQL: Fetching publications for PID ${authorPidPath}…`;
+    const q = `SELECT ?key ?title ?venue ?year WHERE { ?pub dblp:author <https://dblp.org/pid/${authorPidPath}> ; dblp:primaryKey ?key ; rdfs:label ?title . OPTIONAL { ?pub dblp:publishedIn ?v . ?v rdfs:label ?venue } OPTIONAL { ?pub dcterms:issued ?year } }`;
+    try {
+        const data = await runSparqlQuery(q);
+        const pubs = [];
+        for (const b of (data.results?.bindings ?? [])) {
+            pubs.push({
+                dblpKey: b.key.value,
+                title: b.title.value,
+                venue: b.venue ? b.venue.value : null,
+                year: b.year ? b.year.value : null,
+            });
+        }
+        if (statusTextEl)
+            statusTextEl.textContent = `DBLP SPARQL: fetched ${pubs.length} publications.`;
+        return pubs;
+    }
+    catch (err) {
+        console.error('DBLP SPARQL: error fetching pubs', err);
+        if (statusTextEl)
+            statusTextEl.textContent = 'DBLP SPARQL fetch error.';
+        return [];
+    }
 }
 function getPageCountFromDblpString(pageStr) {
     if (!pageStr) {
@@ -1656,7 +1721,9 @@ async function main() {
                         statusTextElement.textContent = `DBLP: Searching for ${scholarAuthorName}...`;
                     const scholarSamplePubs = getScholarSamplePublications(7);
                     if (scholarSamplePubs.length >= DBLP_HEURISTIC_MIN_OVERLAP_COUNT) {
-                        const dblpCandidates = await searchDblpForAuthor(scholarAuthorName, statusElement);
+                        const dblpCandidates = USE_SPARQL
+                            ? await searchDblpForAuthorSparql(scholarAuthorName, statusElement)
+                            : await searchDblpForAuthor(scholarAuthorName, statusElement);
                         if (dblpCandidates.length > 0) {
                             cachedDblpPidForSave = await selectBestDblpCandidateHeuristically(scholarAuthorName, scholarSamplePubs, dblpCandidates, statusElement);
                         }
@@ -1673,7 +1740,9 @@ async function main() {
                 if (cachedDblpPidForSave) {
                     if (statusTextElement && dblpPubsForCurrentUser.length === 0)
                         statusTextElement.textContent = `DBLP: Fetching publications for PID ${cachedDblpPidForSave}...`;
-                    dblpPubsForCurrentUser = await fetchPublicationsFromDblp(cachedDblpPidForSave, statusElement);
+                    dblpPubsForCurrentUser = USE_SPARQL
+                        ? await fetchPublicationsFromDblpSparql(cachedDblpPidForSave, statusElement)
+                        : await fetchPublicationsFromDblp(cachedDblpPidForSave, statusElement);
                 }
                 else {
                     if (statusTextElement && scholarAuthorName)
