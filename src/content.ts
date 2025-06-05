@@ -1451,6 +1451,7 @@ async function fetchPublicationsFromDblp(
         const txt = item.querySelector(tag)?.textContent?.trim();
         if (txt) { rawVenue = txt; break; }
       }
+      const issue = item.querySelector('number')?.textContent?.trim();
 
       /* ---------- 2. stream-derived metadata (optional) ---------- */
       let acronym:     string | null = null;
@@ -1470,6 +1471,10 @@ async function fetchPublicationsFromDblp(
             venue_full = streamMeta.title    ?? null;
           }
         }
+      }
+
+      if (!acronym && rawVenue?.startsWith('Proc. ACM') && issue && /^[A-Za-z]{2,}$/.test(issue)) {
+        acronym = issue;
       }
 
       /* ---------- 3. push entry ---------- */

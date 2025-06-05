@@ -42,7 +42,7 @@ type Fixtures = { context: BrowserContext };
 export const test = base.extend<Fixtures>({
   context: async ({}, use) => {
     const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: false,                                // headed browser = extension UI works
+      headless: process.env.PWTEST_MODE === 'ci' ? true : false,
       viewport: { width: 1280, height: 800 },
       args: [
         `--disable-extensions-except=${extensionPath}`,

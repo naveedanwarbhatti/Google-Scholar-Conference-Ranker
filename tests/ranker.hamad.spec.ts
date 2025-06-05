@@ -3,7 +3,9 @@
 // Checks the total badge-count distribution on a known Scholar profile.
 // Uses the extension-aware Playwright fixture.
 
-import { test, expect } from './fixtures/extensionContext';
+import { test as base, expect } from './fixtures/extensionContext';
+
+const test = process.env.PWTEST_MODE === 'ci' ? base.skip : base;
 
 // ───────────────────────────────
 // CONFIG

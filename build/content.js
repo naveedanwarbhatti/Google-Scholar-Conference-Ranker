@@ -1485,6 +1485,7 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
                     break;
                 }
             }
+            const issue = item.querySelector('number')?.textContent?.trim();
             /* ---------- 2. stream-derived metadata (optional) ---------- */
             let acronym = null;
             let venue_full = null;
@@ -1500,6 +1501,9 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
                         venue_full = streamMeta.title ?? null;
                     }
                 }
+            }
+            if (!acronym && rawVenue?.startsWith('Proc. ACM') && issue && /^[A-Za-z]{2,}$/.test(issue)) {
+                acronym = issue;
             }
             /* ---------- 3. push entry ---------- */
             publications.push({

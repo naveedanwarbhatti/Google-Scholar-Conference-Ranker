@@ -3,7 +3,9 @@
 // ✔ waits until at least one badge exists
 // ✔ verifies every badge label is a known rank (A*, A, B, C, U, N/A)
 
-import { test, expect } from "./fixtures/extensionContext";
+import { test as base, expect } from "./fixtures/extensionContext";
+
+const test = process.env.PWTEST_MODE === 'ci' ? base.skip : base;
 
 test("rank badges appear", async ({ page }) => {
   await page.goto("https://scholar.google.com.pk/citations?hl=en&user=6ZB86uYAAAAJ");

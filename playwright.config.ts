@@ -29,7 +29,7 @@ export default defineConfig({
   timeout: 60_000,
 
   use: {
-    headless: false,                    // extension needs a headed browser
+    headless: process.env.PWTEST_MODE === 'ci' ? true : false,
     viewport: { width: 1280, height: 800 },
     launchOptions: {
       args: [

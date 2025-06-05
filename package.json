@@ -19,6 +19,7 @@
     "@playwright/test": "^1.44.0",
     "@types/chrome": "^0.0.322",
     "@types/node": "^20.11.17",
+    "@xmldom/xmldom": "^0.9.8",
     "copyfiles": "^2.4.1",
     "cpx": "^1.5.0",
     "rimraf": "^5.0.5",
