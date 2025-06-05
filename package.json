@@ -10,7 +10,7 @@
     "copy-assets": "cpx \"manifest.json\" build && cpx \"{core/**/*,icons/**/*,images/**/*}\" build",
     "zip": "cd build && zip -r ../ranker.zip .",
     "e2e": "npm run build && playwright test",
-    "test": "echo \"No unit tests yet – run: npm run e2e\""
+    "test": "echo \"run: npm run e2e\""
   },
   "keywords": [],
   "author": "",
