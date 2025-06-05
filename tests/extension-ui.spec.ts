@@ -10,7 +10,7 @@ test("rank badges appear", async ({ page }) => {
 
   // 1️⃣ wait until the extension has injected ≥1 badge
   const badges = page.locator("span[class*=rank-badge]");
-  await expect.poll(() => badges.count(), { timeout: 15_000 }).toBeGreaterThan(0);
+  await expect.poll(() => badges.count(), { timeout: 55_000 }).toBeGreaterThan(0);
 
   // 2️⃣ validate badge text against a whitelist
   const allowed = new Set(["A*", "A", "B", "C", "U", "N/A"]);

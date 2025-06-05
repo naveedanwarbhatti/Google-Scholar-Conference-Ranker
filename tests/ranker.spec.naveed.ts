@@ -21,7 +21,7 @@ const EXPECTED = {
 // ───────────────────────────────
 // TEST
 // ───────────────────────────────
-test('overall badge distribution is correct', async ({ page }) => {
+test('overall badge distribution is correct for Naveed Bhatti', async ({ page }) => {
   // 1 — open profile, let network settle
   await page.goto(PROFILE, { waitUntil: 'networkidle' });
 
