@@ -1,29 +1,29 @@
 {
   "description": "Google-Scholar Conference Ranker – build, zip and end-to-end test",
-  "working_directory": "/workspace",                 /* repo root in the sandbox */
+  "working_directory": "/workspace",               /* repo root in the sandbox  */
   "command_prefix": "bash -lc",
-  "timeout": 600000,                                 /* 10 minutes max per cmd */
+  "timeout": 600000,                               /* 10 min max per command    */
 
   "setup_commands": [
     /* ─────────── OS packages ─────────── */
     "apt-get update",
     "apt-get install -y curl git zip",
 
-    /* ─────────── Node.js 18 LTS ───────── */
-    "curl -fsSL https://deb.nodesource.com/setup_18.x | bash -",
+    /* ─────────── Node.js 20 LTS ──────── */
+    "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -",
     "apt-get install -y nodejs",
 
-    /* ─────────── Project deps ─────────── */
+    /* ─────────── Project deps ────────── */
     "npm ci",
 
-    /* ─────────── Playwright browser ───── */
-    "npx playwright install chromium"
+    /* ─────────── Playwright browsers ─── */
+    "npx playwright install --with-deps"           /* chromium + firefox + webkit */
   ],
 
   "commands": {
-    "clean": "npm run clean",        /* wipes ./build (rarely needed directly) */
-    "build": "npm run build",        /* TypeScript → ./build/                  */
-    "zip":   "npm run zip",          /* creates ranker.zip inside repo root    */
-    "e2e":   "npm run e2e"           /* build + Playwright test suite          */
+    "clean": "npm run clean",                      /* wipes ./build              */
+    "build": "npm run build",                      /* TypeScript → ./build/      */
+    "zip":   "npm run zip",                        /* ./ranker.zip in repo root  */
+    "e2e":   "PWTEST_MODE=ci npm run e2e"          /* build + Playwright tests   */
   }
 }
