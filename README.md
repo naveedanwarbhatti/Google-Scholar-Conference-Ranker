@@ -8,6 +8,8 @@ This Chrome extension enhances your Google Scholar experience by automatically f
 
 ![Screenshot of Extension in Action](Images/Screenshot.png)
 
+You can also install the extension directly from the [Chrome Web Store](https://chromewebstore.google.com/detail/egohghgpljdhkmcmllhncfndmkeilpfb?utm_source=item-share-cb).
+
 
 ### Why?
 
@@ -49,6 +51,15 @@ Google Scholar is great at collecting publications but **terrible at showing th
 
 
 
+
+## Limitations & Troubleshooting
+
+* **DBLP coverage** – Papers missing from DBLP are not counted in the summary.
+* **Short papers** – Conference papers under six pages are excluded as short papers.
+* **Name mismatches** – DBLP may list your papers under a different name, leading to profile mismatches.
+* **Tips**
+  * Verify your DBLP profile is correct and matches your Scholar name.
+  * Report mismatches or missing venues using the "Report Bug" link.
 
 ## Data Source and Acknowledgements
 
