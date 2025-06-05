@@ -1203,6 +1203,8 @@ function sanitizeAuthorName(name: string): string {
         /[,\s]+professor$/i,
     ];
     for (const p of patterns) cleaned = cleaned.replace(p, "");
+    cleaned = cleaned.replace(/\s*\([^)]*\)\s*/g, " ");
+    cleaned = cleaned.replace(/\s+/g, " ");
     return cleaned.trim();
 }
 
@@ -1315,7 +1317,7 @@ async function selectBestDblpCandidateHeuristically(
         console.log(`  Candidate DBLP Author: "${candidateDblpName}", URL from info: ${candidateHit.info.url}`);
         console.log(`  Name Similarity (vs "${scholarAuthorName}"): ${nameSimilarity.toFixed(3)}`);
 
-        const MIN_NAME_SIMILARITY_FOR_FULL_FETCH = 0.70;
+        const MIN_NAME_SIMILARITY_FOR_FULL_FETCH = 0.65;
         if (nameSimilarity < MIN_NAME_SIMILARITY_FOR_FULL_FETCH) {
             console.log(`  Name Similarity ${nameSimilarity.toFixed(3)} < ${MIN_NAME_SIMILARITY_FOR_FULL_FETCH}. Skipping full publication fetch for this candidate.`);
             continue;
