@@ -22,6 +22,15 @@ const EXPECTED = {
 // TEST
 // ───────────────────────────────
 test('overall badge distribution is correct for Naveed Bhatti', async ({ page }) => {
+  // Inject script to append "PhD" to the author's name before the extension runs
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const el = document.getElementById('gsc_prf_in');
+      if (el && el.textContent && !/PhD/.test(el.textContent)) {
+        el.textContent += ' PhD';
+      }
+    });
+  });
   // 1 — open profile, let network settle
   await page.goto(PROFILE, { waitUntil: 'networkidle' });
 

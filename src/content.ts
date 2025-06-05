@@ -1192,6 +1192,20 @@ function getScholarAuthorName(): string | null {
     return null;
 }
 
+// Removes trailing academic titles (e.g., "PhD", "Dr.") for DBLP search
+function sanitizeAuthorName(name: string): string {
+    let cleaned = name.trim();
+    const patterns = [
+        /[,\s]+ph\.d\.?$/i,
+        /[,\s]+phd$/i,
+        /[,\s]+dr\.?$/i,
+        /[,\s]+prof\.?$/i,
+        /[,\s]+professor$/i,
+    ];
+    for (const p of patterns) cleaned = cleaned.replace(p, "");
+    return cleaned.trim();
+}
+
 function getScholarSamplePublications(count: number = 7): ScholarSamplePublication[] {
     const samples: ScholarSamplePublication[] = [];
     const publicationRows = document.querySelectorAll('tr.gsc_a_tr');
@@ -1647,7 +1661,8 @@ async function main() {
     // --- DBLP Author Identification & Data Fetch ---
     if (currentUserId) {
         const scholarAuthorName = getScholarAuthorName();
-        if (scholarAuthorName) {
+        const sanitizedName = scholarAuthorName ? sanitizeAuthorName(scholarAuthorName) : null;
+        if (sanitizedName) {
             const cachedUserData = await loadCachedData(currentUserId);
             // Prefer fresh DBLP match if cache is old or PID is missing
             if (cachedUserData?.dblpAuthorPid && cachedUserData.dblpMatchTimestamp && (Date.now() - cachedUserData.dblpMatchTimestamp) < DBLP_CACHE_DURATION_MS) {
@@ -1655,15 +1670,15 @@ async function main() {
                 console.log("GSR INFO: Using valid cached DBLP PID:", cachedDblpPidForSave);
             } else {
                 if (cachedUserData?.dblpAuthorPid) console.log("GSR INFO: Cached DBLP PID is stale or missing timestamp. Will attempt fresh DBLP author match.");
-                else console.log("GSR INFO: No valid cached DBLP PID. Attempting fresh DBLP author match for:", scholarAuthorName);
+                else console.log("GSR INFO: No valid cached DBLP PID. Attempting fresh DBLP author match for:", sanitizedName);
 
-                if (statusTextElement) statusTextElement.textContent = `DBLP: Searching for ${scholarAuthorName}...`;
+                if (statusTextElement) statusTextElement.textContent = `DBLP: Searching for ${sanitizedName}...`;
                 const scholarSamplePubs = getScholarSamplePublications(7);
                 if (scholarSamplePubs.length >= DBLP_HEURISTIC_MIN_OVERLAP_COUNT) {
-                    const dblpCandidates = await searchDblpForAuthor(scholarAuthorName, statusElement);
+                    const dblpCandidates = await searchDblpForAuthor(sanitizedName, statusElement);
                     if (dblpCandidates.length > 0) {
                         cachedDblpPidForSave = await selectBestDblpCandidateHeuristically(
-                            scholarAuthorName, scholarSamplePubs, dblpCandidates, statusElement
+                            sanitizedName, scholarSamplePubs, dblpCandidates, statusElement
                         );
                     } else {
                         if (statusTextElement) statusTextElement.textContent = "DBLP: No candidates found for this author.";
@@ -1676,7 +1691,7 @@ async function main() {
                 if (statusTextElement && dblpPubsForCurrentUser.length === 0) statusTextElement.textContent = `DBLP: Fetching publications for PID ${cachedDblpPidForSave}...`;
                 dblpPubsForCurrentUser = await fetchPublicationsFromDblp(cachedDblpPidForSave, statusElement);
             } else {
-                 if (statusTextElement && scholarAuthorName) statusTextElement.textContent = "DBLP: Could not match author. Ranking may be limited.";
+                 if (statusTextElement && sanitizedName) statusTextElement.textContent = "DBLP: Could not match author. Ranking may be limited.";
                  await new Promise(resolve => setTimeout(resolve, 1500));
             }
         } else {

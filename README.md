@@ -22,6 +22,7 @@ Google Scholar is great at collecting publications but **terrible at showing th
 | 🎯 **Historical Matching** | Selects the appropriate CORE ranking list (2023, 2021, 2020, 2018, 2017, 2014) based on the publication's year. Applies multiple heuristics for matching. |
 | 🏷 **Rank badges**        | A\*, A, B, C colour‑coded inline next to each paper title, reflecting the historical rank.                                                |
 | 📊 **Summary panel**      | Totals for A\*, A, B, C, N/A papers on the profile, aggregated across all processed publications.                                         |
+| 🧹 **Name cleanup**       | Trailing titles like "PhD" or "Dr." are removed before DBLP lookup for better matches. |
 
 
 ## Quick Install
