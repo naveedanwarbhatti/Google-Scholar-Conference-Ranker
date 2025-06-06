@@ -441,11 +441,6 @@ function stripOrgPrefixes(text: string): string {
 }
 
 
-/**
- * Return the CORE rank for a venue.
- * – If the acronym is ambiguous we try to disambiguate with the stream’s full title.
- * – If that fails we now return "N/A" instead of picking the highest rank.
- */
 function findRankForVenue(
     venueKey: string | null,
     coreData: CoreEntry[],
@@ -1032,9 +1027,7 @@ function setupPublicationTableObserver(retryCount = 0) {
         return;
     }
 
-    // console.log("GSR OBSERVER: #gsc_a_c found. Proceeding with observer setup.");
-
-    // Ensure we have rank data to apply before setting up an observer
+   
     if (!activeCachedPublicationRanks || !rankMapForObserver || rankMapForObserver.size === 0) {
         console.warn("GSR OBSERVER: Setup aborted (at data check step), missing cached rank data or rank map is empty.");
         return;
@@ -1537,8 +1530,7 @@ function getPageCountFromDblpString(pageStr: string | null | undefined): number 
         }
     }
     
-    // Handle electronic journal pages like "25:1-25:10" or "1-10" (within an article number context)
-    // This pattern is similar to the one above but allows for the colon prefix on both sides.
+    
     match = pageStr.match(/^(?:(\d+):)?(\d+)\s*-\s*(?:(\d+):)?(\d+)$/i);
     if (match) {
         const prefix1 = match[1]; // e.g. "25" in "25:1"
@@ -1547,27 +1539,21 @@ function getPageCountFromDblpString(pageStr: string | null | undefined): number 
         const endPage = parseInt(match[4], 10);
 
         if (!isNaN(startPage) && !isNaN(endPage) && endPage >= startPage) {
-            // If prefixes exist and are different, it's complex (e.g., 25:8-26:2).
-            // For simplicity, if prefixes are the same or only one side has a prefix,
-            // or no prefixes, calculate simple page diff.
+            
             if (prefix1 === undefined && prefix2 === undefined) { // e.g. "1-10"
                  return endPage - startPage + 1;
             }
             if (prefix1 && prefix2 && prefix1 === prefix2) { // e.g. "25:1-25:10"
                 return endPage - startPage + 1;
             }
-            // More complex cases like "10:S1-10:S5" or cross-section ranges are harder to generalize
-            // For now, if prefixes differ or are one-sided with a range, we might still get a valid count
-            // if the simple start-end logic makes sense.
-            // If only end has prefix, it's odd. If only start has prefix, it's also odd for standard ranges.
-            // This simplified logic might misinterpret some complex cases, but covers common ones.
+            
              return endPage - startPage + 1;
 
         }
     }
 
 
-    // If no specific format matched, we can't determine a reliable count.
+    
     return null;
 }
 
@@ -1636,11 +1622,9 @@ console.log(
     if (statusTextEl && mappedCount > 0) statusTextEl.textContent = `DBLP: Mapped ${mappedCount} publication details.`;
 }
 
-// --- END: DBLP Integration Functions ---
 
 
 
-// --- START: Main Orchestration ---
 async function main() {
   if (isMainProcessing) { return; }
   isMainProcessing = true;
@@ -2000,9 +1984,7 @@ if (!attemptPageInitialization()) {
         }
     });
 
-    // Observe the document for changes, waiting for #gsc_a_b to appear.
-    // Start observing once the DOM is minimally ready. For content scripts,
-    // document.documentElement should be available at `document_idle`.
+    
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", () => {
              if (document.documentElement && pageInitializationObserver) { // Check observer still exists
