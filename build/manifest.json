@@ -61,7 +61,9 @@
         "https://scholar.google.si/*",
         "https://scholar.google.sk/*",
         "https://scholar.google.ua/*",
-        "https://scholar.google.us/*"
+        "https://scholar.google.us/*",
+		"https://dblp.org/",
+		"https://sparql.dblp.org/"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

@@ -33,11 +33,15 @@ let isMainProcessing = false;
 let activeCachedPublicationRanks = null;
 let publicationTableObserver = null;
 let rankMapForObserver = null; // Maps URL to Rank
-// --- START: DBLP Constants & Globals ---
+// --- START: DBLP Constants & Globals (UPDATED with new logic) ---
 const DBLP_API_AUTHOR_SEARCH_URL = "https://dblp.org/search/author/api";
 const DBLP_API_PERSON_PUBS_URL_PREFIX = "https://dblp.org/pid/";
 const DBLP_HEURISTIC_MIN_OVERLAP_COUNT = 2;
-const DBLP_HEURISTIC_SCORE_THRESHOLD = 2.5;
+// --- NEW CONSTANTS FROM EFFICIENT SCRIPT ---
+const DBLP_SPARQL_ENDPOINT = "https://sparql.dblp.org/sparql";
+const HEURISTIC_SCORE_THRESHOLD = 2.5;
+const HEURISTIC_MIN_NAME_SIMILARITY = 0.65;
+// ---
 let dblpPubsForCurrentUser = [];
 let scholarUrlToDblpVenueMap = new Map();
 let scholarUrlToDblpInfoMap = new Map();
@@ -449,11 +453,6 @@ function stripOrgPrefixes(text) {
     } while (strippedSomething && currentText.length > 0);
     return currentText;
 }
-/**
- * Return the CORE rank for a venue.
- * – If the acronym is ambiguous we try to disambiguate with the stream’s full title.
- * – If that fails we now return "N/A" instead of picking the highest rank.
- */
 function findRankForVenue(venueKey, coreData, fullVenueTitle = undefined) {
     if (!venueKey || !venueKey.trim())
         return "N/A";
@@ -1119,8 +1118,6 @@ function setupPublicationTableObserver(retryCount = 0) {
         }
         return;
     }
-    // console.log("GSR OBSERVER: #gsc_a_c found. Proceeding with observer setup.");
-    // Ensure we have rank data to apply before setting up an observer
     if (!activeCachedPublicationRanks || !rankMapForObserver || rankMapForObserver.size === 0) {
         console.warn("GSR OBSERVER: Setup aborted (at data check step), missing cached rank data or rank map is empty.");
         return;
@@ -1242,25 +1239,21 @@ function restoreVisibleInlineBadgesFromCache(cachedRanks) {
     });
     console.log(`GSR RESTORE: Finished. Applied ${badgesAppliedCount} badges to ${allVisibleRows.length} visible rows.`);
 }
-// --- START: DBLP Integration Functions ---
+// --- START: DBLP Integration Functions (REPLACED/UPDATED) ---
+// Helper function from new script
+const normalizeText = (s) => s.toLowerCase().replace(/[\.,\/#!$%\^&\*;:{}=\_`~?"“”()\[\]]/g, " ").replace(/\s+/g, ' ').trim();
 function getScholarAuthorName() {
     const nameElement = document.getElementById('gsc_prf_in');
     if (nameElement) {
         return nameElement.textContent?.trim() || null;
     }
-    // Fallback for potentially different DOM structures if #gsc_prf_in isn't found
-    const legacyNameElement = document.querySelector('#gsc_prf_in_name_value');
-    if (legacyNameElement) {
-        return legacyNameElement.textContent?.trim() || null;
-    }
-    // Try another common pattern if the profile header is simpler
     const h1NameElement = document.querySelector('#gs_hdr_name > a, #gs_hdr_name');
     if (h1NameElement) {
         return h1NameElement.textContent?.trim() || null;
     }
     return null;
 }
-// Removes trailing academic titles (e.g., "PhD", "Dr.") for DBLP search
+// This function is from the new script and is excellent.
 function sanitizeAuthorName(name) {
     let cleaned = name.trim();
     const patterns = [
@@ -1272,8 +1265,7 @@ function sanitizeAuthorName(name) {
     ];
     for (const p of patterns)
         cleaned = cleaned.replace(p, "");
-    cleaned = cleaned.replace(/\s*\([^)]*\)\s*/g, " ");
-    cleaned = cleaned.replace(/\s+/g, " ");
+    cleaned = cleaned.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ");
     return cleaned.trim();
 }
 function getScholarSamplePublications(count = 7) {
@@ -1297,151 +1289,98 @@ function getScholarSamplePublications(count = 7) {
     }
     return samples;
 }
-async function searchDblpForAuthor(authorName, statusElement) {
-    const statusTextEl = statusElement?.querySelector('.gsr-status-text');
-    if (statusTextEl)
-        statusTextEl.textContent = `DBLP: Searching for "${authorName}"...`;
+// --- NEW FAST DBLP IDENTIFICATION LOGIC ---
+async function searchDblpForCandidates(authorName) {
     const url = new URL(DBLP_API_AUTHOR_SEARCH_URL);
-    url.searchParams.append('q', authorName);
-    url.searchParams.append('format', 'json');
-    url.searchParams.append('h', '10');
-    url.searchParams.append('c', '3'); // Request some completions (publications)
+    url.searchParams.set('q', authorName);
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('h', '10');
     try {
-        const response = await fetch(url.toString());
-        if (!response.ok) {
-            console.warn(`DBLP: Author search failed for "${authorName}": ${response.statusText}`);
-            if (statusTextEl)
-                statusTextEl.textContent = `DBLP: Search failed (${response.status}).`;
+        const resp = await fetch(url.toString());
+        if (!resp.ok)
             return [];
-        }
-        const data = await response.json();
-        if (data.result?.hits?.hit) {
-            const hits = Array.isArray(data.result.hits.hit) ? data.result.hits.hit : [data.result.hits.hit];
-            if (statusTextEl)
-                statusTextEl.textContent = `DBLP: Found ${hits.length} potential author(s). Analyzing...`;
-            return hits;
-        }
+        const data = await resp.json();
+        const hits = data.result?.hits?.hit;
+        return Array.isArray(hits) ? hits : hits ? [hits] : [];
     }
     catch (error) {
-        console.error("DBLP: Error during author search:", error);
+        console.error("DBLP candidate search failed:", error);
+        return [];
     }
-    if (statusTextEl)
-        statusTextEl.textContent = `DBLP: No results or error for "${authorName}".`;
-    return [];
 }
-function extractPidFromDblpUrl(dblpAuthorUrl) {
-    const matchPers = dblpAuthorUrl.match(/dblp\.org\/pers\/hd\/[a-z0-9]\/([^.]+)/i);
-    if (matchPers && matchPers[1]) {
-        return matchPers[1].replace(/=/g, '');
-    }
-    const matchPid = dblpAuthorUrl.match(/dblp\.org\/pid\/([^/]+\/[^.]+)/i);
-    if (matchPid && matchPid[1]) {
-        return matchPid[1];
-    }
-    // A simpler PID extraction, e.g. https://dblp.org/pid/01/1234.html -> 01/1234
-    const simplePidMatch = dblpAuthorUrl.match(/dblp\.org\/pid\/([\w\/-]+)\.html/i);
-    if (simplePidMatch && simplePidMatch[1]) {
-        return simplePidMatch[1];
-    }
-    // For URLs like: https://dblp.org/pers/gnd/123456789
-    const gndMatch = dblpAuthorUrl.match(/dblp\.org\/pers\/gnd\/(\w+)/i);
-    if (gndMatch && gndMatch[1]) {
-        return `gnd/${gndMatch[1]}`; // Prefix to indicate it's a GND PID if needed
-    }
-    console.warn("DBLP: Could not extract PID from URL:", dblpAuthorUrl);
+function extractPidFromUrl(url) {
+    let match = url.match(/pid\/([^/]+\/[^.]+)/i);
+    if (match?.[1])
+        return match[1];
+    match = url.match(/pers\/hd\/[a-z0-9]\/([^.]+)/i);
+    if (match?.[1])
+        return match[1].replace(/=/g, '');
+    match = url.match(/pid\/([\w\/-]+)\.html/i);
+    if (match?.[1])
+        return match[1];
     return null;
 }
-async function selectBestDblpCandidateHeuristically(scholarAuthorName, scholarSamplePubs, dblpCandidates, statusElement) {
-    const statusTextEl = statusElement?.querySelector('.gsr-status-text');
-    if (statusTextEl)
-        statusTextEl.textContent = `DBLP: Analyzing ${dblpCandidates.length} potential DBLP candidates...`;
-    console.log("--- DBLP Heuristic Matching Start ---");
-    console.log("Scholar Author Name:", scholarAuthorName);
-    console.log("Scholar Sample Pubs (titles only for brevity):", scholarSamplePubs.map(p => `${p.title.substring(0, 50)}... (${p.year})`));
-    let bestCandidatePid = null;
+async function fetchDblpPublicationsViaSparql(pid) {
+    const authorUri = `https://dblp.org/pid/${pid}`;
+    const query = `PREFIX dblp: <https://dblp.org/rdf/schema#> SELECT ?title ?year WHERE { ?paper dblp:authoredBy <${authorUri}> . ?paper dblp:title ?title . OPTIONAL { ?paper dblp:yearOfPublication ?year . } } LIMIT 100`;
+    const url = `${DBLP_SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}&output=json`;
+    try {
+        const response = await fetch(url, { headers: { 'Accept': 'application/sparql-results+json' } });
+        if (!response.ok)
+            return [];
+        const json = await response.json();
+        return json.results.bindings.map((b) => ({ title: b.title.value, year: b.year ? b.year.value : null }));
+    }
+    catch (error) {
+        console.error(`SPARQL query failed for PID ${pid}:`, error);
+        return [];
+    }
+}
+async function findBestDblpProfile(scholarName, scholarSamplePubs) {
+    const candidates = await searchDblpForCandidates(scholarName);
+    let bestPid = null;
     let highestScore = 0;
-    for (const [index, candidateHit] of dblpCandidates.entries()) {
-        console.log(`\nProcessing DBLP Candidate Hit #${index + 1} of ${dblpCandidates.length}:`);
-        console.log("GSR DEBUG: Current candidateHit object being evaluated:", JSON.stringify(candidateHit, null, 2)); // Log the object
-        // Check using .author and .url from candidateHit.info
-        if (!candidateHit.info || typeof candidateHit.info.author !== 'string' || !candidateHit.info.url || typeof candidateHit.info.url !== 'string') {
-            console.warn("DBLP: Candidate hit is malformed (missing info, info.author (string), or info.url (string)), skipping. Condition was true.");
-            console.warn("GSR DEBUG: Values causing skip: candidateHit.info:", candidateHit.info, "typeof candidateHit.info.author:", typeof candidateHit.info?.author, "candidateHit.info.url:", candidateHit.info?.url, "typeof candidateHit.info.url:", typeof candidateHit.info?.url);
+    const scholarTitles = scholarSamplePubs.map(p => p.title);
+    for (const candidate of candidates) {
+        if (!candidate.info || !candidate.info.author || !candidate.info.url)
             continue;
-        }
-        const candidateDblpName = candidateHit.info.author.replace(/\s\d{4}$/, '').trim();
-        const nameSimilarity = jaroWinkler(scholarAuthorName.toLowerCase(), candidateDblpName.toLowerCase());
-        console.log(`  Candidate DBLP Author: "${candidateDblpName}", URL from info: ${candidateHit.info.url}`);
-        console.log(`  Name Similarity (vs "${scholarAuthorName}"): ${nameSimilarity.toFixed(3)}`);
-        const MIN_NAME_SIMILARITY_FOR_FULL_FETCH = 0.65;
-        if (nameSimilarity < MIN_NAME_SIMILARITY_FOR_FULL_FETCH) {
-            console.log(`  Name Similarity ${nameSimilarity.toFixed(3)} < ${MIN_NAME_SIMILARITY_FOR_FULL_FETCH}. Skipping full publication fetch for this candidate.`);
+        const dblpName = candidate.info.author.replace(/\s\d{4}$/, '');
+        const nameSimilarity = jaroWinkler(scholarName.toLowerCase(), dblpName.toLowerCase());
+        if (nameSimilarity < HEURISTIC_MIN_NAME_SIMILARITY)
             continue;
-        }
+        const pid = extractPidFromUrl(candidate.info.url);
+        if (!pid)
+            continue;
         let currentScore = nameSimilarity * 2.0;
-        console.log(`  Initial score from name similarity: ${currentScore.toFixed(3)}`);
-        const candidatePid = extractPidFromDblpUrl(candidateHit.info.url); // Use candidateHit.info.url
-        if (!candidatePid) {
-            console.log(`  Could not extract PID for DBLP candidate "${candidateDblpName}" from info.url: ${candidateHit.info.url}, skipping full publication fetch.`);
-            continue;
-        }
-        console.log(`  Extracted PID: ${candidatePid}`);
-        if (statusTextEl)
-            statusTextEl.textContent = `DBLP: Verifying "${candidateDblpName}" (PID: ${candidatePid})... (${index + 1}/${dblpCandidates.length})`;
-        console.log(`  Fetching full publications for DBLP PID: ${candidatePid} (Author: "${candidateDblpName}")`);
-        const candidateFullDblpPubs = await fetchPublicationsFromDblp(candidatePid, undefined);
-        console.log(`  Fetched ${candidateFullDblpPubs.length} DBLP publications for PID ${candidatePid}. First 3:`, candidateFullDblpPubs.slice(0, 3).map(p => ({ title: p.title.substring(0, 50) + "...", venue: p.venue, year: p.year })));
         let overlapCount = 0;
-        let publicationMatchScoreContribution = 0;
-        if (candidateFullDblpPubs.length > 0 && scholarSamplePubs.length > 0) {
-            console.log(`  Comparing ${scholarSamplePubs.length} Scholar samples with ${candidateFullDblpPubs.length} full DBLP publications for "${candidateDblpName}"`);
-            for (const scholarPub of scholarSamplePubs) {
-                for (const dblpPub of candidateFullDblpPubs) {
-                    const cleanDblpTitle = cleanTextForComparison(dblpPub.title.toLowerCase());
-                    const titleScore = jaroWinkler(scholarPub.title, cleanDblpTitle);
-                    const TITLE_MATCH_THRESHOLD = 0.85;
-                    if (titleScore > TITLE_MATCH_THRESHOLD) {
-                        console.log(`    MATCH! Scholar: "${scholarPub.title.substring(0, 50)}..." (Year: ${scholarPub.year}) <-> DBLP: "${dblpPub.title.substring(0, 50)}..." (Year: ${dblpPub.year}) [Title Similarity: ${titleScore.toFixed(3)}]`);
-                        publicationMatchScoreContribution += 1.0;
-                        overlapCount++;
-                        if (scholarPub.year && dblpPub.year) {
-                            const scholarYearNum = scholarPub.year;
-                            const dblpYearNum = parseInt(dblpPub.year, 10);
-                            if (!isNaN(dblpYearNum) && Math.abs(scholarYearNum - dblpYearNum) <= 1) {
-                                publicationMatchScoreContribution += 0.5;
-                                console.log("      Year match bonus (0.5) applied.");
-                            }
-                        }
-                        break;
-                    }
+        // This is the key change: using the fast SPARQL query
+        const dblpPublications = await fetchDblpPublicationsViaSparql(pid);
+        if (dblpPublications.length === 0)
+            continue;
+        for (const scholarTitle of scholarTitles) {
+            for (const dblpPub of dblpPublications) {
+                if (jaroWinkler(normalizeText(scholarTitle), normalizeText(dblpPub.title)) > 0.85) {
+                    overlapCount++;
+                    currentScore += 1.0;
+                    break;
                 }
             }
         }
-        currentScore += publicationMatchScoreContribution;
-        console.log(`  Overlap Count (full publication check): ${overlapCount}`);
-        console.log(`  Publication Match Score Contribution: ${publicationMatchScoreContribution.toFixed(3)}`);
-        console.log(`  Current Total Score for DBLP candidate "${candidateDblpName}": ${currentScore.toFixed(3)}`);
         if (currentScore > highestScore && overlapCount >= DBLP_HEURISTIC_MIN_OVERLAP_COUNT) {
             highestScore = currentScore;
-            bestCandidatePid = candidatePid;
-            console.log(`  *** NEW BEST CANDIDATE (full check): PID ${bestCandidatePid}, Author "${candidateDblpName}", Score ${highestScore.toFixed(3)} ***`);
+            bestPid = pid;
         }
     }
-    console.log("--- DBLP Heuristic Matching End ---");
-    // ... (rest of the function for threshold check and returning PID)
-    if (bestCandidatePid && highestScore >= DBLP_HEURISTIC_SCORE_THRESHOLD) {
-        if (statusTextEl)
-            statusTextEl.textContent = `DBLP: Confidently matched PID ${bestCandidatePid} (Score: ${highestScore.toFixed(2)}).`;
-        console.log(`GSR: DBLP Heuristic Match SUCCESS for "${scholarAuthorName}" -> PID: ${bestCandidatePid}, Score: ${highestScore.toFixed(2)}`);
-        return bestCandidatePid;
+    if (bestPid && highestScore >= HEURISTIC_SCORE_THRESHOLD) {
+        console.log(`GSR: DBLP Heuristic Match SUCCESS for "${scholarName}" -> PID: ${bestPid}, Score: ${highestScore.toFixed(2)}`);
+        return bestPid;
     }
     else {
-        if (statusTextEl)
-            statusTextEl.textContent = `DBLP: No confident DBLP match found (Best score: ${highestScore.toFixed(2)}).`;
-        console.log(`GSR: DBLP heuristic matching failed for "${scholarAuthorName}". Best score ${highestScore.toFixed(2)}. Threshold: ${DBLP_HEURISTIC_SCORE_THRESHOLD}, Min Overlap Required: ${DBLP_HEURISTIC_MIN_OVERLAP_COUNT}`);
+        console.log(`GSR: DBLP heuristic matching failed for "${scholarName}". Best score ${highestScore.toFixed(2)}.`);
         return null;
     }
 }
+// --- ORIGINAL SLOW XML-BASED FETCH (kept for detailed data gathering of the *confirmed* author) ---
 async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
     const statusTextEl = statusElement?.querySelector(".gsr-status-text");
     if (statusTextEl) {
@@ -1477,7 +1416,6 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
                 continue;
             const year = item.querySelector("year")?.textContent || null;
             const pages = item.querySelector("pages")?.textContent || null;
-            /* ---------- 1. raw venue (booktitle / journal / …) ---------- */
             const venueElements = ["booktitle", "journal", "series", "school"];
             let rawVenue = null;
             for (const tag of venueElements) {
@@ -1488,7 +1426,6 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
                 }
             }
             const issue = item.querySelector('number')?.textContent?.trim();
-            /* ---------- 2. stream-derived metadata (optional) ---------- */
             let acronym = null;
             let venue_full = null;
             const pubUrl = item.querySelector("url")?.textContent?.trim();
@@ -1499,7 +1436,7 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
                     const streamXmlUrl = `https://dblp.org/streams/conf/${streamId}.xml`;
                     const streamMeta = await fetchDblpStreamMetadata(streamXmlUrl);
                     if (streamMeta) {
-                        acronym = streamMeta.acronym ?? null; // may still be null
+                        acronym = streamMeta.acronym ?? null;
                         venue_full = streamMeta.title ?? null;
                     }
                 }
@@ -1507,15 +1444,14 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
             if (!acronym && rawVenue?.startsWith('Proc. ACM') && issue && /^[A-Za-z]{2,}$/.test(issue)) {
                 acronym = issue;
             }
-            /* ---------- 3. push entry ---------- */
             publications.push({
                 dblpKey,
                 title,
-                venue: rawVenue, // ← always “raw” venue
+                venue: rawVenue,
                 year,
                 pages,
-                venue_full, // ← null if no valid stream
-                acronym // ← null if no valid stream
+                venue_full,
+                acronym
             });
         }
         if (statusTextEl) {
@@ -1535,22 +1471,14 @@ function getPageCountFromDblpString(pageStr) {
         return null;
     }
     pageStr = pageStr.trim();
-    // Handle article numbers like "Article 27", "23", "IV" - these are not page counts
     if (/^(article\s+\d+|\d+$|[ivxlcdm]+$)/i.test(pageStr) && !pageStr.includes('-') && !pageStr.includes(':')) {
-        // If it's just a number, it could be a single page or start page.
-        // For simplicity, if it's not a range, we can't be sure of the count.
-        // Or, assume 1 page if it's just a number like "123". Let's be conservative.
         const singleNumMatch = pageStr.match(/^(\d+)$/);
         if (singleNumMatch) {
-            // This is ambiguous. Could be page "123" (1 page) or start of many.
-            // Let's return null to indicate uncertainty for single numbers unless it's very small.
-            // if (parseInt(singleNumMatch[1],10) < 5) return 1; // Heuristic: small single number likely 1 page
             return null;
         }
-        return null; // Cannot determine count from article numbers or single Roman numerals
+        return null;
     }
-    // Handle ranges like "10-15" or "S10-S15"
-    let match = pageStr.match(/^(?:[a-z\d]+:)?(\d+)\s*-\s*(?:[a-z\d]+:)?(\d+)$/i); // Supports "section:start-section:end" or just "start-end"
+    let match = pageStr.match(/^(?:[a-z\d]+:)?(\d+)\s*-\s*(?:[a-z\d]+:)?(\d+)$/i);
     if (match) {
         const start = parseInt(match[1], 10);
         const end = parseInt(match[2], 10);
@@ -1558,38 +1486,25 @@ function getPageCountFromDblpString(pageStr) {
             return end - start + 1;
         }
     }
-    // Handle electronic journal pages like "25:1-25:10" or "1-10" (within an article number context)
-    // This pattern is similar to the one above but allows for the colon prefix on both sides.
     match = pageStr.match(/^(?:(\d+):)?(\d+)\s*-\s*(?:(\d+):)?(\d+)$/i);
     if (match) {
-        const prefix1 = match[1]; // e.g. "25" in "25:1"
+        const prefix1 = match[1];
         const startPage = parseInt(match[2], 10);
-        const prefix2 = match[3]; // e.g. "25" in "25:10"
+        const prefix2 = match[3];
         const endPage = parseInt(match[4], 10);
         if (!isNaN(startPage) && !isNaN(endPage) && endPage >= startPage) {
-            // If prefixes exist and are different, it's complex (e.g., 25:8-26:2).
-            // For simplicity, if prefixes are the same or only one side has a prefix,
-            // or no prefixes, calculate simple page diff.
-            if (prefix1 === undefined && prefix2 === undefined) { // e.g. "1-10"
+            if (prefix1 === undefined && prefix2 === undefined) {
                 return endPage - startPage + 1;
             }
-            if (prefix1 && prefix2 && prefix1 === prefix2) { // e.g. "25:1-25:10"
+            if (prefix1 && prefix2 && prefix1 === prefix2) {
                 return endPage - startPage + 1;
             }
-            // More complex cases like "10:S1-10:S5" or cross-section ranges are harder to generalize
-            // For now, if prefixes differ or are one-sided with a range, we might still get a valid count
-            // if the simple start-end logic makes sense.
-            // If only end has prefix, it's odd. If only start has prefix, it's also odd for standard ranges.
-            // This simplified logic might misinterpret some complex cases, but covers common ones.
             return endPage - startPage + 1;
         }
     }
-    // If no specific format matched, we can't determine a reliable count.
     return null;
 }
-async function buildDblpInfoMap(scholarPubLinkElements, dblpPublications, 
-// MODIFIED: Update mapToFill's type signature to include venue_full and acronym
-mapToFill, statusElement) {
+async function buildDblpInfoMap(scholarPubLinkElements, dblpPublications, mapToFill, statusElement) {
     if (dblpPublications.length === 0)
         return;
     const statusTextEl = statusElement?.querySelector('.gsr-status-text');
@@ -1601,9 +1516,7 @@ mapToFill, statusElement) {
         for (const dblpPub of dblpPublications) {
             const cleanDblpTitle = cleanTextForComparison(dblpPub.title.toLowerCase());
             const titleSimilarity = jaroWinkler(cleanScholarTitle, cleanDblpTitle);
-            // inside buildDblpInfoMap(), just before the `if (titleSimilarity > 0.90)` line
-            console.log('[SIM]', titleSimilarity.toFixed(3), '\n   GS :', scholarPub.titleText, '\n   DBLP:', cleanDblpTitle);
-            if (titleSimilarity > 0.90) { // Threshold for title match
+            if (titleSimilarity > 0.90) {
                 let yearMatch = false;
                 if (scholarPub.yearFromProfile && dblpPub.year) {
                     if (Math.abs(scholarPub.yearFromProfile - parseInt(dblpPub.year, 10)) <= 1) {
@@ -1613,16 +1526,14 @@ mapToFill, statusElement) {
                 else {
                     yearMatch = true;
                 }
-                // dblpPub.venue might be null if no stream and no fallback booktitle/journal
-                // but dblpKey should always exist for a valid DBLP entry.
                 if (yearMatch && dblpPub.dblpKey) {
                     const pageCount = getPageCountFromDblpString(dblpPub.pages);
                     mapToFill.set(scholarPub.url, {
                         venue: dblpPub.venue,
                         pageCount: pageCount,
                         dblpKey: dblpPub.dblpKey,
-                        venue_full: dblpPub.venue_full, // Store full venue title from stream
-                        acronym: dblpPub.acronym // Store acronym from stream
+                        venue_full: dblpPub.venue_full,
+                        acronym: dblpPub.acronym
                     });
                     mappedCount++;
                     break;
@@ -1634,36 +1545,29 @@ mapToFill, statusElement) {
     if (statusTextEl && mappedCount > 0)
         statusTextEl.textContent = `DBLP: Mapped ${mappedCount} publication details.`;
 }
-// --- END: DBLP Integration Functions ---
-// --- START: Main Orchestration ---
 async function main() {
     if (isMainProcessing) {
         return;
     }
     isMainProcessing = true;
-    // Clear session-specific DBLP data
     disconnectPublicationTableObserver();
     activeCachedPublicationRanks = null;
     rankMapForObserver = null;
     dblpPubsForCurrentUser = [];
-    scholarUrlToDblpInfoMap.clear(); // Ensure it's clear for this run
+    scholarUrlToDblpInfoMap.clear();
     const statusElement = createStatusElement("Initializing Scholar Ranker...");
     const statusTextElement = statusElement.querySelector('.gsr-status-text');
     const currentUserId = getScholarUserId();
     const determinedPublicationRanks = [];
     let cachedDblpPidForSave = null;
-    // --- START: Sets for de-duplication ---
-    const scholarTitlesAlreadyRanked = new Set(); // Stores exact Scholar titles that got A*/A/B/C
-    const dblpKeysAlreadyUsedForRank = new Set(); // Stores DBLP keys that yielded an A*/A/B/C
-    // --- END: Sets for de-duplication ---
+    const scholarTitlesAlreadyRanked = new Set();
+    const dblpKeysAlreadyUsedForRank = new Set();
     try {
-        // --- DBLP Author Identification & Data Fetch ---
         if (currentUserId) {
             const scholarAuthorName = getScholarAuthorName();
             const sanitizedName = scholarAuthorName ? sanitizeAuthorName(scholarAuthorName) : null;
             if (sanitizedName) {
                 const cachedUserData = await loadCachedData(currentUserId);
-                // Prefer fresh DBLP match if cache is old or PID is missing
                 if (cachedUserData?.dblpAuthorPid && cachedUserData.dblpMatchTimestamp && (Date.now() - cachedUserData.dblpMatchTimestamp) < DBLP_CACHE_DURATION_MS) {
                     cachedDblpPidForSave = cachedUserData.dblpAuthorPid;
                     console.log("GSR INFO: Using valid cached DBLP PID:", cachedDblpPidForSave);
@@ -1675,23 +1579,21 @@ async function main() {
                         console.log("GSR INFO: No valid cached DBLP PID. Attempting fresh DBLP author match for:", sanitizedName);
                     if (statusTextElement)
                         statusTextElement.textContent = `DBLP: Searching for ${sanitizedName}...`;
+                    // --- THIS IS THE REPLACEMENT LOGIC ---
                     const scholarSamplePubs = getScholarSamplePublications(7);
                     if (scholarSamplePubs.length >= DBLP_HEURISTIC_MIN_OVERLAP_COUNT) {
-                        const dblpCandidates = await searchDblpForAuthor(sanitizedName, statusElement);
-                        if (dblpCandidates.length > 0) {
-                            cachedDblpPidForSave = await selectBestDblpCandidateHeuristically(sanitizedName, scholarSamplePubs, dblpCandidates, statusElement);
-                        }
-                        else {
-                            if (statusTextElement)
-                                statusTextElement.textContent = "DBLP: No candidates found for this author.";
-                        }
+                        // Call the new, fast author identification function
+                        cachedDblpPidForSave = await findBestDblpProfile(sanitizedName, scholarSamplePubs);
                     }
                     else {
                         if (statusTextElement)
                             statusTextElement.textContent = "DBLP: Not enough unique Scholar publications for match attempt.";
                     }
+                    // --- END OF REPLACEMENT ---
                 }
                 if (cachedDblpPidForSave) {
+                    // We still call the original XML-based fetch here, but only for the one confirmed author.
+                    // This is necessary to get the detailed data (pages, full venue) for the ranking logic.
                     if (statusTextElement && dblpPubsForCurrentUser.length === 0)
                         statusTextElement.textContent = `DBLP: Fetching publications for PID ${cachedDblpPidForSave}...`;
                     dblpPubsForCurrentUser = await fetchPublicationsFromDblp(cachedDblpPidForSave, statusElement);
@@ -1707,7 +1609,6 @@ async function main() {
                     statusTextElement.textContent = "Could not determine Scholar author name from page.";
             }
         }
-        // --- End DBLP ---
         if (statusTextElement)
             statusTextElement.textContent = "Expanding publications list...";
         await expandAllPublications(statusElement);
@@ -1723,7 +1624,7 @@ async function main() {
                 publicationLinkElements.push({
                     url: normalizeUrlForCache(linkEl.href),
                     rowElement: row,
-                    titleText: linkEl.textContent.trim().toLowerCase(), // Title is normalized here
+                    titleText: linkEl.textContent.trim().toLowerCase(),
                     yearFromProfile: yearFromProfile
                 });
             }
@@ -1736,19 +1637,12 @@ async function main() {
             return;
         }
         if (dblpPubsForCurrentUser.length > 0) {
-            // This will populate scholarUrlToDblpInfoMap with dblpKey
             await buildDblpInfoMap(publicationLinkElements, dblpPubsForCurrentUser, scholarUrlToDblpInfoMap, statusElement);
-        }
-        else {
-            // ... (logging if DBLP match but no pubs, or no DBLP match) ...
         }
         updateStatusElement(statusElement, 0, publicationLinkElements.length, "Ranking");
         const rankCounts = { "A*": 0, "A": 0, "B": 0, "C": 0, "N/A": 0 };
         let processedCount = 0;
-        const processPublication = async (pubInfo, 
-        // Passed sets for de-duplication:
-        titlesAlreadyProcessedSet, dblpKeysUsedSet) => {
-            // Check 1: Exact Scholar title already processed and received a valid rank.
+        const processPublication = async (pubInfo, titlesAlreadyProcessedSet, dblpKeysUsedSet) => {
             if (titlesAlreadyProcessedSet.has(pubInfo.titleText)) {
                 console.log(`GSR INFO: Scholar title (exact) "${pubInfo.titleText.substring(0, 50)}..." already ranked. Marking as N/A.`);
                 return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
@@ -1756,25 +1650,21 @@ async function main() {
             let currentRank = "N/A";
             let dblpKeyUsedForThisRanking = null;
             try {
-                // Check 2: Keyword filter on the Scholar title itself.
                 for (const keyword of IGNORE_KEYWORDS) {
-                    if (pubInfo.titleText.includes(keyword)) { // pubInfo.titleText is already lowercase
+                    if (pubInfo.titleText.includes(keyword)) {
                         return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
                     }
                 }
-                const dblpInfo = scholarUrlToDblpInfoMap.get(pubInfo.url); // pubInfo.url is normalized
-                if (dblpInfo && dblpInfo.venue && dblpInfo.dblpKey) { // DBLP info is available
-                    dblpKeyUsedForThisRanking = dblpInfo.dblpKey; // This DBLP entry is being considered
-                    // Check 3: This DBLP entry (by its key) has already provided an A*/A/B/C rank.
+                const dblpInfo = scholarUrlToDblpInfoMap.get(pubInfo.url);
+                if (dblpInfo && dblpInfo.venue && dblpInfo.dblpKey) {
+                    dblpKeyUsedForThisRanking = dblpInfo.dblpKey;
                     if (dblpKeysUsedSet.has(dblpInfo.dblpKey)) {
                         console.log(`GSR INFO: DBLP key "${dblpInfo.dblpKey}" (for Scholar title "${pubInfo.titleText.substring(0, 50)}...") already used to assign a rank. Marking as N/A.`);
                         return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
                     }
-                    // --- Proceed with DBLP-based ranking ---
                     let venueName = dblpInfo.venue;
                     let pageCount = dblpInfo.pageCount;
                     let publicationYear = pubInfo.yearFromProfile;
-                    // Refine year using the DBLP entry's year if possible
                     const matchedDblpEntry = dblpPubsForCurrentUser.find(dp => dp.dblpKey === dblpInfo.dblpKey);
                     if (matchedDblpEntry && matchedDblpEntry.year) {
                         const dblpYearNum = parseInt(matchedDblpEntry.year, 10);
@@ -1782,17 +1672,14 @@ async function main() {
                             publicationYear = dblpYearNum;
                         }
                     }
-                    // Page count filter (from DBLP)
                     if (pageCount !== null && pageCount < 6) {
                         console.log(`GSR INFO: Excluding DBLP-identified paper "${pubInfo.titleText.substring(0, 50)}..." (DBLP Key: ${dblpInfo.dblpKey}) due to page count < 6 (Pages: ${pageCount}). Venue: ${venueName}`);
                         return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
                     }
                     const effectiveYear = publicationYear;
-                    // venueName here is still dblpInfo.venue (which could be the stream acronym or the booktitle)
-                    // This is used for the IGNORE_KEYWORDS check on the DBLP venue.
                     const lowerVenueName = venueName ? venueName.toLowerCase() : "";
                     let venueIgnoredByKeyword = false;
-                    if (venueName) { // Only check if venueName is not null
+                    if (venueName) {
                         for (const keyword of IGNORE_KEYWORDS) {
                             if (lowerVenueName.includes(keyword)) {
                                 venueIgnoredByKeyword = true;
@@ -1800,63 +1687,42 @@ async function main() {
                             }
                         }
                     }
-                    else {
-                        // If venueName itself is null (e.g. DBLP entry had no booktitle, journal, or stream acronym),
-                        // it likely won't find a rank anyway, but we can consider it as not passing keyword checks
-                        // or handle it as an inability to rank. For now, findRankForVenue will receive null.
-                    }
                     if (!venueIgnoredByKeyword) {
                         const coreDataFile = getCoreDataFileForYear(effectiveYear);
                         const yearSpecificCoreData = await loadCoreDataForFile(coreDataFile);
                         if (yearSpecificCoreData.length > 0) {
-                            // --- MODIFICATION STARTS HERE ---
                             let venueForRankingApi = null;
-                            // dblpInfo.acronym comes from DblpPublicationEntry.acronym (the <acronym> tag from stream XML)
-                            // venueName is dblpInfo.venue (which is DblpPublicationEntry.venue)
-                            if (dblpInfo.acronym && dblpInfo.acronym.trim() !== "") { // Prioritize dblpInfo.acronym if it exists and is not empty
+                            if (dblpInfo.acronym && dblpInfo.acronym.trim() !== "") {
                                 venueForRankingApi = dblpInfo.acronym;
                             }
-                            else if (venueName && venueName.trim() !== "") { // Fallback to venueName (dblpInfo.venue) if acronym is not usable
+                            else if (venueName && venueName.trim() !== "") {
                                 venueForRankingApi = venueName;
                             }
-                            // If both dblpInfo.acronym and venueName are null/empty, venueForRankingApi will be null.
-                            // findRankForVenue should handle null input gracefully (it typically returns "N/A").
                             const fullVenueTitleForRanking = dblpInfo.venue_full ?? null;
-                            currentRank = findRankForVenue(venueForRankingApi || "", yearSpecificCoreData, fullVenueTitleForRanking // <-- new tie-breaker input
-                            );
-                            // Use non-null assertion if findRankForVenue expects string, or adjust findRankForVenue
-                            // Assuming findRankForVenue can handle null for its first param and returns "N/A"
-                            // If findRankForVenue cannot handle null and expects a string, ensure venueForRankingApi is a string or ""
-                            // currentRank = findRankForVenue(venueForRankingApi || "", yearSpecificCoreData); // Example: pass empty string if null
-                            // --- MODIFICATION ENDS HERE ---
+                            currentRank = findRankForVenue(venueForRankingApi, yearSpecificCoreData, fullVenueTitleForRanking);
                         }
                     }
-                    // --- End DBLP-based ranking logic ---
                 }
-                // If no dblpInfo (i.e., this Scholar URL did not map to any DBLP entry),
-                // currentRank remains "N/A". 
             }
             catch (error) {
                 console.warn(`GSR Error processing publication (URL: ${pubInfo.url}, Title: "${pubInfo.titleText.substring(0, 50)}..."):`, error);
             }
-            // If a valid rank (A*, A, B, C) was determined:
             if (VALID_RANKS.includes(currentRank)) {
-                titlesAlreadyProcessedSet.add(pubInfo.titleText); // Mark this exact Scholar title as having received a valid rank.
-                if (dblpKeyUsedForThisRanking) { // If the rank came from a DBLP entry
-                    dblpKeysUsedSet.add(dblpKeyUsedForThisRanking); // Mark this DBLP key as "used up" for ranking.
+                titlesAlreadyProcessedSet.add(pubInfo.titleText);
+                if (dblpKeyUsedForThisRanking) {
+                    dblpKeysUsedSet.add(dblpKeyUsedForThisRanking);
                 }
             }
             return { rank: currentRank, rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
         };
         for (const pubInfo of publicationLinkElements) {
-            // Pass the de-duplication sets to processPublication
             const result = await processPublication(pubInfo, scholarTitlesAlreadyRanked, dblpKeysAlreadyUsedForRank);
             rankCounts[result.rank]++;
             displayRankBadgeAfterTitle(result.rowElement, result.rank);
             determinedPublicationRanks.push({
-                titleText: result.titleText, // This is the original, non-cleaned title for storage if needed elsewhere
+                titleText: result.titleText,
                 rank: result.rank,
-                url: result.url // Normalized URL
+                url: result.url
             });
             processedCount++;
             updateStatusElement(statusElement, processedCount, publicationLinkElements.length, "Ranking");
@@ -1889,7 +1755,6 @@ async function initialLoad() {
     if (userId) {
         const cached = await loadCachedData(userId);
         if (cached && cached.publicationRanks) {
-            // Pass cached.dblpAuthorPid to displaySummaryPanel
             const pubRanksArr = unpackRanks(cached.publicationRanks);
             displaySummaryPanel(cached.rankCounts, userId, pubRanksArr, cached.timestamp, cached.dblpAuthorPid);
             return;
@@ -1906,10 +1771,8 @@ async function initialLoad() {
     });
 }
 function executeInitialLoad() {
-    // console.log("GSR: Conditions met, executing initialLoad.");
     initialLoad().catch(error => {
         console.error("GSR: Error during initialLoad triggered by executeInitialLoad:", error);
-        // Attempt to display an error if UI elements aren't already present from a partial run
         if (!document.getElementById(STATUS_ELEMENT_ID) && !document.getElementById(SUMMARY_PANEL_ID)) {
             const statusElem = createStatusElement("A critical error occurred during initialization.");
             const statusText = statusElem.querySelector('.gsr-status-text');
@@ -1923,80 +1786,53 @@ function executeInitialLoad() {
 }
 let pageInitializationObserver = null;
 function attemptPageInitialization() {
-    // Check if already processing or if UI is already fully initialized
     if (isMainProcessing && (document.getElementById(STATUS_ELEMENT_ID) || document.getElementById(SUMMARY_PANEL_ID))) {
-        // console.log("GSR: Attempting initialization - Main processing already underway with UI. Aborting to prevent duplication.");
-        return true; // Consider it "handled" as it's in progress or done
+        return true;
     }
     if (document.getElementById(SUMMARY_PANEL_ID)) {
-        // console.log("GSR: Attempting initialization - Summary panel already exists. Assuming fully initialized. Aborting.");
-        return true; // Consider it "handled" as it's already done
+        return true;
     }
-    // Check if we are on the correct Google Scholar citations page
     if (window.location.pathname.includes("/citations")) {
         const tableBodyElement = document.getElementById('gsc_a_b');
         if (tableBodyElement) {
-            // console.log("GSR: #gsc_a_b found.");
-            // If we found the table body, and not already processed, we can proceed.
-            // Disconnect the observer if it was active, as we've found our condition.
             if (pageInitializationObserver) {
                 pageInitializationObserver.disconnect();
                 pageInitializationObserver = null;
-                // console.log("GSR: Page content observer disconnected.");
             }
-            // Use a timeout before calling executeInitialLoad, similar to the original script's delay.
-            // This gives a brief moment for Google Scholar to settle its DOM after #gsc_a_b appears.
             setTimeout(executeInitialLoad, 500);
-            return true; // Initialization has been scheduled
-        }
-        else {
-            // console.log("GSR: #gsc_a_b not yet found on /citations page.");
+            return true;
         }
     }
     else {
-        // console.log("GSR: Not on a /citations page.");
-        // If not on the citations page, disconnect observer if it's running
         if (pageInitializationObserver) {
             pageInitializationObserver.disconnect();
             pageInitializationObserver = null;
-            // console.log("GSR: Not on citations page, observer disconnected.");
         }
     }
-    return false; // Conditions to start initialization were not met
+    return false;
 }
-// Try to initialize immediately when the script loads.
-// This handles cases where the page is already fully loaded.
 if (!attemptPageInitialization()) {
-    // console.log("GSR: Initial attemptPageInitialization failed. Setting up MutationObserver to wait for #gsc_a_b.");
     pageInitializationObserver = new MutationObserver((mutationsList, observer) => {
-        // console.log("GSR: Page observer detected DOM mutation.");
         if (attemptPageInitialization()) {
-            // If attemptPageInitialization returns true, it means it either scheduled the load
-            // or determined it was already handled/processing. The observer can be stopped.
-            // Disconnection is handled within attemptPageInitialization if #gsc_a_b is found.
+            // Observer is disconnected within the function
         }
     });
-    // Observe the document for changes, waiting for #gsc_a_b to appear.
-    // Start observing once the DOM is minimally ready. For content scripts,
-    // document.documentElement should be available at `document_idle`.
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", () => {
-            if (document.documentElement && pageInitializationObserver) { // Check observer still exists
+            if (document.documentElement && pageInitializationObserver) {
                 pageInitializationObserver.observe(document.documentElement, { childList: true, subtree: true });
             }
         });
     }
     else {
-        if (document.documentElement && pageInitializationObserver) { // Check observer still exists
+        if (document.documentElement && pageInitializationObserver) {
             pageInitializationObserver.observe(document.documentElement, { childList: true, subtree: true });
         }
     }
-    // Safety timeout: if #gsc_a_b doesn't appear after a while, stop observing to prevent issues.
     setTimeout(() => {
         if (pageInitializationObserver) {
             pageInitializationObserver.disconnect();
             pageInitializationObserver = null;
-            // console.log("GSR: Page observer timed out after 15 seconds.");
         }
-    }, 15000); // 15 seconds
+    }, 15000);
 }
