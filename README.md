@@ -1,6 +1,9 @@
+![Version 1.6.1](https://img.shields.io/badge/version-1.6.1-blue.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 # Google Scholar Conference Ranker (CORE Edition)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 
 **Instantly see CORE conference rankings directly on Google Scholar profile pages! Essential for researchers in Computer Science, Electrical Engineering, and related fields.**
 
@@ -8,7 +11,12 @@ This Chrome extension enhances your Google Scholar experience by automatically f
 
 ![Screenshot of Extension in Action](Images/Screenshot.png)
 
-You can also install the extension directly from the [Chrome Web Store](https://chromewebstore.google.com/detail/egohghgpljdhkmcmllhncfndmkeilpfb?utm_source=item-share-cb).
+<p align="left">
+  <a href="https://chromewebstore.google.com/detail/egohghgpljdhkmcmllhncfndmkeilpfb?utm_source=item-share-cb">
+    <img src="https://developer.chrome.com/static/docs/webstore/branding/image/UV4C4ybeBTsZt43U4xis.png" alt="Available in the Chrome Web Store">
+  </a>
+</p>
+
 
 
 ### Why?
