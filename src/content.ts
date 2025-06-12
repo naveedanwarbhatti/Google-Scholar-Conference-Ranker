@@ -1,5 +1,13 @@
 // scholar-ranker/content.ts
 
+// --- NEW: Custom Error for specific DBLP API failures ---
+class DblpRateLimitError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'DblpRateLimitError';
+    }
+}
+
 interface CoreEntry {
   title: string;
   acronym: string;
@@ -965,7 +973,8 @@ function displaySummaryPanel(
     betaLabel.textContent = 'BETA';
     betaLabel.style.padding = '1px 7px'; betaLabel.style.fontSize = '0.7em'; betaLabel.style.fontWeight = '600';
     betaLabel.style.color = '#fff'; betaLabel.style.backgroundColor = '#6c757d'; betaLabel.style.borderRadius = '10px';
-    betaLabel.style.lineHeight = '1.4'; betaLabel.style.height = 'fit-content'; betaLabel.style.display = 'inline-flex';
+    betaLabel.style.lineHeight = '1.4'; betaLabel.style.height = 'fit-content';
+    betaLabel.style.display = 'inline-flex';
     betaLabel.style.alignItems = 'center'; betaLabel.style.marginRight = '10px'; betaLabel.style.cursor = 'help';
     betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\nIt is free and open source.\nIt uses historical CORE rankings (2014-2023) based on publication year.\nHelp us spot inconsistencies!\nFor any issues, please click on “Report Bug”.");
     finalFooterDiv.appendChild(betaLabel);
@@ -1011,39 +1020,74 @@ function displaySummaryPanel(
     }
 }
 
+// --- NEW: Function to display the specific DBLP rate limit error ---
+function displayDblpRateLimitError() {
+    const statusElement = document.getElementById(STATUS_ELEMENT_ID) || createStatusElement("DBLP Error");
+    
+    const title = statusElement.querySelector<HTMLElement>('div:first-child');
+    if (title) {
+        title.textContent = "DBLP API Busy";
+    }
+
+    const progressBar = statusElement.querySelector<HTMLElement>('.gsr-progress-bar-inner');
+    if(progressBar) {
+        progressBar.style.width = '100%';
+        progressBar.style.backgroundColor = '#FFA500'; // Orange for warning
+    }
+
+    const statusText = statusElement.querySelector<HTMLElement>('.gsr-status-text');
+    if (statusText) {
+        statusText.innerHTML = `DBLP is overwhelmed (Too Many Requests).<br>Give it some time to recover!`;
+        statusText.style.color = '#D2691E';
+    }
+
+    // Add a "Try Again" button to the status panel
+    let tryAgainButton = statusElement.querySelector<HTMLButtonElement>('.gsr-try-again-button');
+    if (!tryAgainButton) {
+        tryAgainButton = document.createElement('button');
+        tryAgainButton.textContent = 'Try Again';
+        tryAgainButton.className = 'gsr-try-again-button';
+        tryAgainButton.style.marginTop = '10px';
+        tryAgainButton.style.padding = '5px 10px';
+        tryAgainButton.style.fontSize = '12px';
+        tryAgainButton.style.cursor = 'pointer';
+        tryAgainButton.style.border = '1px solid #ccc';
+        tryAgainButton.style.borderRadius = '5px';
+        tryAgainButton.onclick = () => {
+            if (isMainProcessing) return;
+            console.log("GSR: 'Try Again' clicked. Rerunning main process.");
+            main().catch(error => console.error("GSR: Error during manual retry:", error));
+        };
+        statusElement.appendChild(tryAgainButton);
+    }
+}
+
 function setupPublicationTableObserver(retryCount = 0) {
     disconnectPublicationTableObserver(); // Ensure any old one is gone
     const MAX_RETRIES = 5; // Try up to 5 times
     const RETRY_DELAY = 250; // Wait 250ms between retries
 
-    // console.log(`GSR OBSERVER: Attempting to setup observer (Attempt ${retryCount + 1}).`);
-
     const tableContainer = document.getElementById('gsc_a_b');
 
     if (!tableContainer) {
-        // console.warn(`GSR OBSERVER: Publication table container #gsc_a_c not found (Attempt ${retryCount + 1}).`);
         if (retryCount < MAX_RETRIES) {
-            // console.log(`GSR OBSERVER: Will retry in ${RETRY_DELAY}ms.`);
             setTimeout(() => setupPublicationTableObserver(retryCount + 1), RETRY_DELAY);
         } else {
-            console.error("GSR OBSERVER: Max retries reached for finding #gsc_a_c. Observer not set up. 'Show more' may not work.");
+            console.error("GSR OBSERVER: Max retries reached for finding #gsc_a_b. Observer not set up. 'Show more' may not work.");
         }
         return;
     }
-
    
     if (!activeCachedPublicationRanks || !rankMapForObserver || rankMapForObserver.size === 0) {
-        console.warn("GSR OBSERVER: Setup aborted (at data check step), missing cached rank data or rank map is empty.");
+        console.warn("GSR OBSERVER: Setup aborted, missing cached rank data or rank map is empty.");
         return;
     }
 
     let reapplyDebounceTimeout: number | null = null;
 
     publicationTableObserver = new MutationObserver((mutationsList, observerInstance) => {
-        // console.log("GSR OBSERVER: Mutation detected in table container.");
 
         if (!document.body.contains(tableContainer) || publicationTableObserver !== observerInstance) {
-             console.warn("GSR OBSERVER: Target no longer in DOM or instance mismatch. Disconnecting this instance.");
              observerInstance.disconnect();
              if (publicationTableObserver === observerInstance) {
                 publicationTableObserver = null;
@@ -1056,7 +1100,6 @@ function setupPublicationTableObserver(retryCount = 0) {
             return;
         }
 
-        // Check if actual publication rows were added
         let newPubRowsAdded = false;
         for (const mutation of mutationsList) {
             if (mutation.type === 'childList') {
@@ -1071,29 +1114,26 @@ function setupPublicationTableObserver(retryCount = 0) {
         }
 
         if (!newPubRowsAdded) {
-            // console.log("GSR OBSERVER: Mutation detected, but no new 'gsc_a_tr' rows added. Skipping badge restoration.");
-            return; // No relevant rows added
+            return; 
         }
-        // console.log("GSR OBSERVER: Relevant new publication rows were added to the DOM.");
 
         if (reapplyDebounceTimeout) {
             clearTimeout(reapplyDebounceTimeout);
         }
         reapplyDebounceTimeout = window.setTimeout(() => {
-            // console.log("GSR OBSERVER: Debounced: Restoring badges for all visible rows after 'Show more' or sort.");
             if (activeCachedPublicationRanks && rankMapForObserver && rankMapForObserver.size > 0) {
                  restoreVisibleInlineBadgesFromCache(activeCachedPublicationRanks);
             } else {
                 console.warn("GSR OBSERVER: Debounced re-scan aborted at execution, cached rank data is unavailable or empty.");
             }
-        }, 300); // 300ms delay
+        }, 300);
     });
 
     try {
         publicationTableObserver.observe(tableContainer, { childList: true, subtree: true });
-        console.log("GSR OBSERVER: Publication table container observer successfully attached to #gsc_a_c.");
+        console.log("GSR OBSERVER: Publication table container observer successfully attached.");
     } catch (e) {
-        console.error("GSR ERROR: Failed to attach publication table container observer to #gsc_a_c:", e);
+        console.error("GSR ERROR: Failed to attach publication table container observer:", e);
     }
 }
 
@@ -1108,24 +1148,14 @@ function restoreVisibleInlineBadgesFromCache(cachedRanks: PublicationRankInfo[])
     const allVisibleRows = document.querySelectorAll('tr.gsc_a_tr');
     const currentRankMap = rankMapForObserver;
 
-    console.log(`GSR RESTORE: Attempting badge restoration. Visible rows: ${allVisibleRows.length}, Cached ranks: ${cachedRanks.length}, Map size: ${currentRankMap ? currentRankMap.size : 'N/A'}`);
-
     if (allVisibleRows.length === 0 || !cachedRanks || cachedRanks.length === 0 || !currentRankMap || currentRankMap.size === 0) {
-        console.warn("GSR RESTORE: Conditions not met (no rows, no ranks, or map unavailable/empty). Skipping.");
         return;
     }
 
     let badgesAppliedCount = 0;
-    allVisibleRows.forEach((row, index) => {
+    allVisibleRows.forEach((row) => {
         const rowElement = row as HTMLElement;
         const linkEl = rowElement.querySelector('td.gsc_a_t a.gsc_a_at');
-
-        const existingBadge = rowElement.querySelector('span.gsr-rank-badge-inline');
-        if (existingBadge) {
-            // If it already has a badge from this script, we can potentially skip it,
-            // or remove and re-add. Current logic removes and re-adds.
-            // console.log(`GSR RESTORE: Row ${index} already has a badge. It will be replaced.`);
-        }
 
         const titleCell = rowElement.querySelector('td.gsc_a_t');
         if (titleCell) {
@@ -1136,42 +1166,20 @@ function restoreVisibleInlineBadgesFromCache(cachedRanks: PublicationRankInfo[])
         if (linkEl instanceof HTMLAnchorElement && linkEl.href) {
             const currentDomUrl = linkEl.href;
             const normalizedCurrentUrl = normalizeUrlForCache(currentDomUrl);
-            const pubTitleForLog = linkEl.textContent?.trim().substring(0, 30) + "...";
-
-            if (index < 5 || index >= allVisibleRows.length - 5) { // Log first 5 and last 5 for brevity
-                 console.log(`GSR RESTORE (Row ${index}, Title: "${pubTitleForLog}"): DOM URL="${currentDomUrl}", Normalized URL="${normalizedCurrentUrl}"`);
-            }
 
             const cachedRank = currentRankMap.get(normalizedCurrentUrl);
 
             if (cachedRank) {
-                if (index < 5 || index >= allVisibleRows.length - 5) {
-                    console.log(`GSR RESTORE (Row ${index}, Title: "${pubTitleForLog}"): Found rank "${cachedRank}" for normalized URL "${normalizedCurrentUrl}". Applying badge.`);
-                }
                 displayRankBadgeAfterTitle(rowElement, cachedRank);
                 badgesAppliedCount++;
-            } else {
-                if (index < 5 || index >= allVisibleRows.length - 5) { // Log misses for first/last few
-                    console.warn(`GSR RESTORE (Row ${index}, Title: "${pubTitleForLog}"): Rank NOT FOUND for normalized URL "${normalizedCurrentUrl}" (from DOM URL "${currentDomUrl}")`);
-                    // One-time log of some keys from the map for comparison if it's the first few misses
-                    // if (index < 5 && !currentRankMap.has(normalizedCurrentUrl)) {
-                    //    console.log("GSR RESTORE: Sample keys from rankMap: ", Array.from(currentRankMap.keys()).slice(0, 5));
-                    // }
-                }
-            }
-        } else {
-            if (index < 5 || index >= allVisibleRows.length - 5) {
-                console.warn(`GSR RESTORE (Row ${index}): No link element found or href missing.`);
             }
         }
     });
-    console.log(`GSR RESTORE: Finished. Applied ${badgesAppliedCount} badges to ${allVisibleRows.length} visible rows.`);
 }
 
 
 // --- START: DBLP Integration Functions (REPLACED/UPDATED) ---
 
-// Helper function from new script
 const normalizeText = (s: string) => s.toLowerCase().replace(/[\.,\/#!$%\^&\*;:{}=\_`~?"“”()\[\]]/g, " ").replace(/\s+/g, ' ').trim();
 
 function getScholarAuthorName(): string | null {
@@ -1186,7 +1194,6 @@ function getScholarAuthorName(): string | null {
     return null;
 }
 
-// This function is from the new script and is excellent.
 function sanitizeAuthorName(name: string): string {
     let cleaned = name.trim();
     const patterns = [
@@ -1232,13 +1239,20 @@ async function searchDblpForCandidates(authorName: string): Promise<any[]> {
     url.searchParams.set('h', '10');
     try {
         const resp = await fetch(url.toString());
-        if (!resp.ok) return [];
+        if (resp.status === 429) {
+            throw new DblpRateLimitError("DBLP API rate limit hit during author search.");
+        }
+        if (!resp.ok) {
+            console.error(`DBLP author search failed with status: ${resp.status}`);
+            return [];
+        }
         const data = await resp.json();
         const hits = data.result?.hits?.hit;
         return Array.isArray(hits) ? hits : hits ? [hits] : [];
     } catch (error) {
-        console.error("DBLP candidate search failed:", error);
-        return [];
+        if (error instanceof DblpRateLimitError) throw error;
+        console.error("DBLP candidate search fetch failed:", error);
+        throw new DblpRateLimitError("DBLP connection failed during author search.");
     }
 }
 
@@ -1251,16 +1265,31 @@ function extractPidFromUrl(url: string): string | null {
 
 async function fetchDblpPublicationsViaSparql(pid: string): Promise<{ title: string; year: string | null }[]> {
     const authorUri = `https://dblp.org/pid/${pid}`;
-    const query = `PREFIX dblp: <https://dblp.org/rdf/schema#> SELECT ?title ?year WHERE { ?paper dblp:authoredBy <${authorUri}> . ?paper dblp:title ?title . OPTIONAL { ?paper dblp:yearOfPublication ?year . } } LIMIT 100`;
+    const query = `
+        PREFIX dblp: <https://dblp.org/rdf/schema#> 
+        SELECT ?title ?year 
+        WHERE { 
+            ?paper dblp:authoredBy <${authorUri}> . 
+            ?paper dblp:title ?title . 
+            OPTIONAL { ?paper dblp:yearOfPublication ?year . } 
+        } 
+        ORDER BY DESC(?year)`;
     const url = `${DBLP_SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}&output=json`;
     try {
         const response = await fetch(url, { headers: { 'Accept': 'application/sparql-results+json' } });
-        if (!response.ok) return [];
+        if (response.status === 429) {
+            throw new DblpRateLimitError("DBLP SPARQL endpoint rate limit hit.");
+        }
+        if (!response.ok) {
+            console.error(`SPARQL query failed for PID ${pid} with status ${response.status}`);
+            return [];
+        }
         const json = await response.json();
         return json.results.bindings.map((b: any) => ({ title: b.title.value, year: b.year ? b.year.value : null }));
     } catch (error) {
-        console.error(`SPARQL query failed for PID ${pid}:`, error);
-        return [];
+        if (error instanceof DblpRateLimitError) throw error;
+        console.error(`SPARQL query connection failed for PID ${pid}:`, error);
+        throw new DblpRateLimitError("DBLP connection failed during SPARQL query.");
     }
 }
 
@@ -1285,7 +1314,6 @@ async function findBestDblpProfile(scholarName: string, scholarSamplePubs: Schol
         let currentScore = nameSimilarity * 2.0;
         let overlapCount = 0;
         
-        // This is the key change: using the fast SPARQL query
         const dblpPublications = await fetchDblpPublicationsViaSparql(pid);
         if (dblpPublications.length === 0) continue;
 
@@ -1314,15 +1342,12 @@ async function findBestDblpProfile(scholarName: string, scholarSamplePubs: Schol
     }
 }
 
-// --- ORIGINAL SLOW XML-BASED FETCH (kept for detailed data gathering of the *confirmed* author) ---
 async function fetchPublicationsFromDblp(
   authorPidPath: string,
   statusElement?: HTMLElement
 ): Promise<DblpPublicationEntry[]> {
 
-  const statusTextEl = statusElement?.querySelector(
-    ".gsr-status-text"
-  ) as HTMLElement | null;
+  const statusTextEl = statusElement?.querySelector<HTMLElement>(".gsr-status-text");
   if (statusTextEl) {
     statusTextEl.textContent = `DBLP: Fetching publications for PID ${authorPidPath}…`;
   }
@@ -1332,6 +1357,9 @@ async function fetchPublicationsFromDblp(
 
   try {
     const response = await fetch(xmlUrl);
+    if (response.status === 429) {
+        throw new DblpRateLimitError(`DBLP XML download rate limit hit for PID ${authorPidPath}.`);
+    }
     if (!response.ok) {
       console.warn(
         `DBLP: Fetching publications XML failed for PID "${authorPidPath}": ${response.statusText} (${response.status})`
@@ -1354,10 +1382,9 @@ async function fetchPublicationsFromDblp(
 
     for (const item of items) {
       const dblpKey = item.getAttribute("key") || "";
-      if (!dblpKey) continue;                       // safety
+      if (!dblpKey) continue;
 
-      const title = (item.querySelector("title")?.textContent || "")
-                      .replace(/\.$/, "");
+      const title = (item.querySelector("title")?.textContent || "").replace(/\.$/, "");
       if (!title) continue;
 
       const year  = item.querySelector("year")?.textContent || null;
@@ -1376,8 +1403,7 @@ async function fetchPublicationsFromDblp(
 
       const pubUrl = item.querySelector("url")?.textContent?.trim();
       if (pubUrl) {
-        const streamMatch =
-          pubUrl.match(/^db\/conf\/[^/]+\/([a-zA-Z][\w-]*?)(\d{4}.*)?\.html/);
+        const streamMatch = pubUrl.match(/^db\/conf\/[^/]+\/([a-zA-Z][\w-]*?)(\d{4}.*)?\.html/);
         if (streamMatch?.[1]) {
           const streamId     = streamMatch[1];
           const streamXmlUrl = `https://dblp.org/streams/conf/${streamId}.xml`;
@@ -1394,41 +1420,26 @@ async function fetchPublicationsFromDblp(
         acronym = issue;
       }
 
-      publications.push({
-        dblpKey,
-        title,
-        venue      : rawVenue,
-        year,
-        pages,
-        venue_full,
-        acronym
-      });
+      publications.push({ dblpKey, title, venue: rawVenue, year, pages, venue_full, acronym });
     }
 
     if (statusTextEl) {
-      statusTextEl.textContent =
-        `DBLP: Fetched ${publications.length} publications.`;
+      statusTextEl.textContent = `DBLP: Fetched ${publications.length} publications.`;
     }
-
   } catch (err) {
+    if (err instanceof DblpRateLimitError) throw err;
     console.error("DBLP: Error fetching/parsing XML:", err);
     if (statusTextEl) statusTextEl.textContent = "DBLP: Error fetching pubs.";
+    throw new DblpRateLimitError("DBLP connection failed during XML download.");
   }
-
   return publications;
 }
 
 
 function getPageCountFromDblpString(pageStr: string | null | undefined): number | null {
-    if (!pageStr) {
-        return null;
-    }
+    if (!pageStr) return null;
     pageStr = pageStr.trim();
     if (/^(article\s+\d+|\d+$|[ivxlcdm]+$)/i.test(pageStr) && !pageStr.includes('-') && !pageStr.includes(':')) {
-        const singleNumMatch = pageStr.match(/^(\d+)$/);
-        if (singleNumMatch) {
-            return null;
-        }
         return null;
     }
     let match = pageStr.match(/^(?:[a-z\d]+:)?(\d+)\s*-\s*(?:[a-z\d]+:)?(\d+)$/i);
@@ -1446,13 +1457,9 @@ function getPageCountFromDblpString(pageStr: string | null | undefined): number 
         const prefix2 = match[3];
         const endPage = parseInt(match[4], 10);
         if (!isNaN(startPage) && !isNaN(endPage) && endPage >= startPage) {
-            if (prefix1 === undefined && prefix2 === undefined) {
-                 return endPage - startPage + 1;
-            }
-            if (prefix1 && prefix2 && prefix1 === prefix2) {
-                return endPage - startPage + 1;
-            }
-             return endPage - startPage + 1;
+            if (prefix1 === undefined && prefix2 === undefined) return endPage - startPage + 1;
+            if (prefix1 && prefix2 && prefix1 === prefix2) return endPage - startPage + 1;
+            return endPage - startPage + 1;
         }
     }
     return null;
@@ -1467,7 +1474,7 @@ async function buildDblpInfoMap(
     statusElement?: HTMLElement
 ) {
     if (dblpPublications.length === 0) return;
-    const statusTextEl = statusElement?.querySelector('.gsr-status-text') as HTMLElement | null;
+    const statusTextEl = statusElement?.querySelector<HTMLElement>('.gsr-status-text');
     if (statusTextEl) statusTextEl.textContent = `DBLP: Mapping ${scholarPubLinkElements.length} Scholar to ${dblpPublications.length} DBLP entries...`;
 
     let mappedCount = 0;
@@ -1522,7 +1529,7 @@ async function main() {
   scholarUrlToDblpInfoMap.clear();
 
   const statusElement = createStatusElement("Initializing Scholar Ranker...");
-  const statusTextElement = statusElement.querySelector('.gsr-status-text') as HTMLElement | null;
+  const statusTextElement = statusElement.querySelector<HTMLElement>('.gsr-status-text');
 
   const currentUserId = getScholarUserId();
   const determinedPublicationRanks: PublicationRankInfo[] = [];
@@ -1546,20 +1553,15 @@ async function main() {
 
                 if (statusTextElement) statusTextElement.textContent = `DBLP: Searching for ${sanitizedName}...`;
                 
-                // --- THIS IS THE REPLACEMENT LOGIC ---
                 const scholarSamplePubs = getScholarSamplePublications(7);
                 if (scholarSamplePubs.length >= DBLP_HEURISTIC_MIN_OVERLAP_COUNT) {
-                    // Call the new, fast author identification function
                     cachedDblpPidForSave = await findBestDblpProfile(sanitizedName, scholarSamplePubs);
                 } else {
                      if (statusTextElement) statusTextElement.textContent = "DBLP: Not enough unique Scholar publications for match attempt.";
                 }
-                // --- END OF REPLACEMENT ---
             }
 
             if (cachedDblpPidForSave) {
-                // We still call the original XML-based fetch here, but only for the one confirmed author.
-                // This is necessary to get the detailed data (pages, full venue) for the ranking logic.
                 if (statusTextElement && dblpPubsForCurrentUser.length === 0) statusTextElement.textContent = `DBLP: Fetching publications for PID ${cachedDblpPidForSave}...`;
                 dblpPubsForCurrentUser = await fetchPublicationsFromDblp(cachedDblpPidForSave, statusElement);
             } else {
@@ -1614,7 +1616,6 @@ async function main() {
     ): Promise<{ rank: string, rowElement: HTMLElement, titleText: string, url: string }> => {
       
       if (titlesAlreadyProcessedSet.has(pubInfo.titleText)) {
-          console.log(`GSR INFO: Scholar title (exact) "${pubInfo.titleText.substring(0,50)}..." already ranked. Marking as N/A.`);
           return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
       }
 
@@ -1634,7 +1635,6 @@ async function main() {
             dblpKeyUsedForThisRanking = dblpInfo.dblpKey;
 
             if (dblpKeysUsedSet.has(dblpInfo.dblpKey)) {
-                console.log(`GSR INFO: DBLP key "${dblpInfo.dblpKey}" (for Scholar title "${pubInfo.titleText.substring(0,50)}...") already used to assign a rank. Marking as N/A.`);
                 return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
             }
 
@@ -1649,7 +1649,6 @@ async function main() {
             }
             
             if (pageCount !== null && pageCount < 6) {
-                console.log(`GSR INFO: Excluding DBLP-identified paper "${pubInfo.titleText.substring(0,50)}..." (DBLP Key: ${dblpInfo.dblpKey}) due to page count < 6 (Pages: ${pageCount}). Venue: ${venueName}`);
                 return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
             }
 
@@ -1665,18 +1664,11 @@ async function main() {
                 }
             }
 
-
             if (!venueIgnoredByKeyword) {
                 const coreDataFile = getCoreDataFileForYear(effectiveYear);
                 const yearSpecificCoreData = await loadCoreDataForFile(coreDataFile);
                 if (yearSpecificCoreData.length > 0) {
-                    let venueForRankingApi: string | null = null;
-                    if (dblpInfo.acronym && dblpInfo.acronym.trim() !== "") {
-                        venueForRankingApi = dblpInfo.acronym;
-                    } else if (venueName && venueName.trim() !== "") {
-                        venueForRankingApi = venueName;
-                    }
-                    
+                    let venueForRankingApi: string | null = dblpInfo.acronym || venueName;
                     const fullVenueTitleForRanking = dblpInfo.venue_full ?? null;
                     currentRank = findRankForVenue(venueForRankingApi, yearSpecificCoreData, fullVenueTitleForRanking);
                 }
@@ -1715,12 +1707,17 @@ async function main() {
     displaySummaryPanel(rankCounts, currentUserId, determinedPublicationRanks, Date.now(), cachedDblpPidForSave);
 
   } catch (error) {
-      console.error("GSR: Uncaught error in main pipeline:", error);
-      const statusElem = document.getElementById(STATUS_ELEMENT_ID) || createStatusElement("An error occurred in main pipeline.");
-      const currentStatusText = statusElem.querySelector('.gsr-status-text') as HTMLElement | null;
-      if (currentStatusText) currentStatusText.textContent = "Error in main. Check console.";
-      const progressBar = statusElem.querySelector('.gsr-progress-bar-inner') as HTMLElement | null;
-      if(progressBar) progressBar.style.backgroundColor = 'red';
+      if (error instanceof DblpRateLimitError) {
+          console.warn("GSR: Caught a DBLP rate limit error. Displaying message to user.", error.message);
+          displayDblpRateLimitError();
+      } else {
+          console.error("GSR: Uncaught error in main pipeline:", error);
+          const statusElem = document.getElementById(STATUS_ELEMENT_ID) || createStatusElement("An error occurred in main pipeline.");
+          const currentStatusText = statusElem.querySelector<HTMLElement>('.gsr-status-text');
+          if (currentStatusText) currentStatusText.textContent = "Error in main. Check console.";
+          const progressBar = statusElem.querySelector<HTMLElement>('.gsr-progress-bar-inner');
+          if(progressBar) progressBar.style.backgroundColor = 'red';
+      }
   } finally {
       isMainProcessing = false;
   }
@@ -1737,32 +1734,26 @@ async function initialLoad() {
         const cached = await loadCachedData(userId);
         if (cached && cached.publicationRanks) {
 			const pubRanksArr = unpackRanks(cached.publicationRanks);
-
             displaySummaryPanel(cached.rankCounts, userId, pubRanksArr, cached.timestamp, cached.dblpAuthorPid);
             return;
         }
     }
     main().catch(error => {
-        console.error("GSR: Error during initial full analysis in main():", error);
-        const statusElem = document.getElementById(STATUS_ELEMENT_ID) || createStatusElement("A critical error occurred.");
-        const statusText = statusElem.querySelector('.gsr-status-text') as HTMLElement | null;
-        if (statusText) statusText.textContent = "Critical Error. Check console.";
-        if(statusElem.querySelector('.gsr-progress-bar-inner')) (statusElem.querySelector('.gsr-progress-bar-inner') as HTMLElement).style.backgroundColor = 'red';
+        // Errors are now handled inside main(), so this top-level catch is a final fallback.
+        if (!(error instanceof DblpRateLimitError)) {
+            console.error("GSR: Error during initial full analysis in main():", error);
+            const statusElem = document.getElementById(STATUS_ELEMENT_ID) || createStatusElement("A critical error occurred.");
+            const statusText = statusElem.querySelector<HTMLElement>('.gsr-status-text');
+            if (statusText) statusText.textContent = "Critical Error. Check console.";
+            const progressBar = statusElem.querySelector<HTMLElement>('.gsr-progress-bar-inner');
+            if (progressBar) progressBar.style.backgroundColor = 'red';
+        }
     });
 }
 
 
 function executeInitialLoad() {
-    initialLoad().catch(error => {
-        console.error("GSR: Error during initialLoad triggered by executeInitialLoad:", error);
-        if (!document.getElementById(STATUS_ELEMENT_ID) && !document.getElementById(SUMMARY_PANEL_ID)) {
-            const statusElem = createStatusElement("A critical error occurred during initialization.");
-            const statusText = statusElem.querySelector('.gsr-status-text') as HTMLElement | null;
-            if (statusText) statusText.textContent = "Critical Error. Check console.";
-            const progressBar = statusElem.querySelector('.gsr-progress-bar-inner') as HTMLElement | null;
-            if(progressBar) progressBar.style.backgroundColor = 'red';
-        }
-    });
+    initialLoad();
 }
 
 let pageInitializationObserver: MutationObserver | null = null;
@@ -1796,7 +1787,7 @@ function attemptPageInitialization() {
 }
 
 if (!attemptPageInitialization()) {
-    pageInitializationObserver = new MutationObserver((mutationsList, observer) => {
+    pageInitializationObserver = new MutationObserver(() => {
         if (attemptPageInitialization()) {
             // Observer is disconnected within the function
         }
