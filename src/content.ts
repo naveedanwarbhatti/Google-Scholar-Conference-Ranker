@@ -1293,6 +1293,62 @@ async function fetchDblpPublicationsViaSparql(pid: string): Promise<{ title: str
     }
 }
 
+
+
+// --- NEW: Resilient publication fetcher for heuristic check ---
+async function getDblpPubsForHeuristicCheck(
+  pid: string
+): Promise<{ title: string; year: string | null }[]> {
+  // --- Primary Method: SPARQL ---
+  try {
+    const publications = await fetchDblpPublicationsViaSparql(pid);
+    // If SPARQL works and returns results, we use them.
+    if (publications.length > 0) {
+      console.log(`GSR Heuristic: Successfully fetched ${publications.length} pubs for PID ${pid} via SPARQL.`);
+      return publications;
+    }
+    // If SPARQL returns 0 results, it might be a transient issue or an author with no listed pubs.
+    // We'll log a warning and proceed to the fallback, just in case.
+    console.warn(`GSR Heuristic: SPARQL for PID ${pid} returned 0 results. Proceeding to XML fallback to confirm.`);
+  } catch (error) {
+    console.warn(
+      `GSR Heuristic: SPARQL fetch for PID ${pid} failed. Using XML API fallback.`,
+      error
+    );
+  }
+
+  // --- Fallback Method: XML API ---
+  // This code runs if the try block above fails or falls through.
+  try {
+    console.log(`GSR Heuristic: Executing XML API fallback for PID ${pid}.`);
+    // We reuse the existing function that fetches from the XML endpoint.
+    // Note: We pass no statusElement, so it won't update the main UI during this background check.
+    const dblpEntries = await fetchPublicationsFromDblp(pid);
+    
+    // We adapt the output to match the format expected by the heuristic checker.
+    return dblpEntries.map(entry => ({
+      title: entry.title,
+      year: entry.year,
+    }));
+  } catch (fallbackError) {
+    console.error(
+      `GSR Heuristic: XML API fallback also failed for PID ${pid}. Cannot verify this candidate.`,
+      fallbackError
+    );
+    // If both methods fail, we return an empty array.
+    return [];
+  }
+}
+
+// async function findBestDblpProfile...
+
+
+
+
+
+
+// in content.ts
+
 async function findBestDblpProfile(scholarName: string, scholarSamplePubs: ScholarSamplePublication[]): Promise<string | null> {
     const candidates = await searchDblpForCandidates(scholarName);
     let bestPid: string | null = null;
@@ -1314,7 +1370,12 @@ async function findBestDblpProfile(scholarName: string, scholarSamplePubs: Schol
         let currentScore = nameSimilarity * 2.0;
         let overlapCount = 0;
         
-        const dblpPublications = await fetchDblpPublicationsViaSparql(pid);
+        // --- MODIFIED LINE ---
+        // OLD: const dblpPublications = await fetchDblpPublicationsViaSparql(pid);
+        // NEW: Call the resilient helper function instead.
+        const dblpPublications = await getDblpPubsForHeuristicCheck(pid);
+        // --- END MODIFICATION ---
+
         if (dblpPublications.length === 0) continue;
 
         for (const scholarTitle of scholarTitles) {
@@ -1565,8 +1626,28 @@ async function main() {
                 if (statusTextElement && dblpPubsForCurrentUser.length === 0) statusTextElement.textContent = `DBLP: Fetching publications for PID ${cachedDblpPidForSave}...`;
                 dblpPubsForCurrentUser = await fetchPublicationsFromDblp(cachedDblpPidForSave, statusElement);
             } else {
-                 if (statusTextElement && sanitizedName) statusTextElement.textContent = "DBLP: Could not match author. Ranking may be limited.";
-                 await new Promise(resolve => setTimeout(resolve, 1500));
+                 // --- START: MODIFIED BLOCK ---
+                 // This block now halts execution if no DBLP profile is found.
+                 if (statusTextElement && sanitizedName) {
+                    // 1. Update the status panel to reflect a final state.
+                    const title = statusElement.querySelector<HTMLElement>('div:first-child');
+                    if (title) {
+                        title.textContent = "DBLP Author Not Found";
+                    }
+
+                    const progressBar = statusElement.querySelector<HTMLElement>('.gsr-progress-bar-inner');
+                    if (progressBar && progressBar.parentElement) {
+                        progressBar.parentElement.style.display = 'none'; // Hide progress bar
+                    }
+
+                    // 2. Display the clear, user-friendly message.
+                    statusTextElement.innerHTML = `Apologies, we could not find a matching author profile on DBLP for "<b>${sanitizedName}</b>".`;
+                    statusTextElement.style.color = '#D2691E';
+                 }
+                 
+                 // 3. Halt all further processing. The 'finally' block will still execute.
+                 return;
+                 // --- END: MODIFIED BLOCK ---
             }
         } else {
             if (statusTextElement) statusTextElement.textContent = "Could not determine Scholar author name from page.";
