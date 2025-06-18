@@ -1194,39 +1194,24 @@ function getScholarAuthorName(): string | null {
     return null;
 }
 
-// in background.ts
-
 function sanitizeAuthorName(name: string): string {
     let cleaned = name.trim();
+    const commaIndex = cleaned.indexOf(',');
+    if (commaIndex !== -1) {
+        cleaned = cleaned.substring(0, commaIndex);
+    }
 
-    // Suffix patterns remain the same
-    const suffixPatterns = [
-        /[,\s]+ph\.d\.?$/i, 
-        /[,\s]+phd$/i,
-        /[,\s]+dr\.?$/i, 
-        /[,\s]+prof\.?$/i, 
-        /[,\s]+professor$/i
-    ];
-
-    // REVISED: Prefix patterns now use `\s*` to handle cases with or without a space.
     const prefixPatterns = [
         /^professor\s*/i,
         /^prof\.?\s*/i,
-        /^dr\.?\s*/i // This now correctly handles "Dr.Basit", "Dr. Basit", and "Dr Basit"
+        /^dr\.?\s*/i
     ];
-
-    // It's slightly more robust to remove prefixes first
     for (const p of prefixPatterns) {
         cleaned = cleaned.replace(p, "");
     }
-
-    for (const p of suffixPatterns) {
-        cleaned = cleaned.replace(p, "");
-    }
-
-    // Existing cleanup for parentheses and extra spaces
+   
+    cleaned = cleaned.replace(/\./g, "");
     cleaned = cleaned.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ");
-    
     return cleaned.trim();
 }
 
