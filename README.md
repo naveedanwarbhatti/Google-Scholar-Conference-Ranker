@@ -38,7 +38,7 @@ Google Scholar is great at collecting publications but **terrible at showing th
 ## Quick Install
 
 1.  **Download or Clone:**
-    *   **Option A (Download ZIP):** Download the latest [release](https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker/releases/download/v1.6.2/Google-Scholar-Conference-Ranker-v1.6.2.zip), or click on the green "Code" button, then "Download ZIP". Extract the ZIP file to a folder on your computer.
+    *   **Option A (Download ZIP):** Download the latest [release](https://github.com/naveedanwarbhatti/Google-Scholar-Conference-Ranker/releases/download/v1.6.3/Google-Scholar-Conference-Ranker-v1.6.3.zip), or click on the green "Code" button, then "Download ZIP". Extract the ZIP file to a folder on your computer.
 	
     *   **Option B (Clone with Git):** If you have Git installed, clone the repository:
         ```bash
