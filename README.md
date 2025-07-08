@@ -1,4 +1,4 @@
-![Version 1.6.4](https://img.shields.io/badge/version-1.6.4-blue.svg)
+![Version 1.6.5](https://img.shields.io/badge/version-1.6.5-blue.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # Google Scholar Conference Ranker (CORE Edition)

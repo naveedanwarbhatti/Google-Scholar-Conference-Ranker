@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Google Scholar Conference Ranker",
   "description": "Classifies conferences on Google Scholar profiles using CORE current and historic rankings. Integrates DBLP for improved accuracy.",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "permissions": [
     "storage"
   ],
