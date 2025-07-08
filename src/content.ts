@@ -116,9 +116,9 @@ let rankMapForObserver: Map<string, string> | null = null; // Maps URL to Rank
 // --- START: DBLP Constants & Globals (UPDATED with new logic) ---
 const DBLP_API_AUTHOR_SEARCH_URL = "https://dblp.org/search/author/api";
 const DBLP_API_PERSON_PUBS_URL_PREFIX = "https://dblp.org/pid/";
-const DBLP_HEURISTIC_MIN_OVERLAP_COUNT = 2;
-// --- NEW CONSTANTS FROM EFFICIENT SCRIPT ---
 const DBLP_SPARQL_ENDPOINT = "https://sparql.dblp.org/sparql";
+const DBLP_HEURISTIC_MIN_OVERLAP_COUNT = 2;
+const DBLP_MAX_HUB_VARIANTS_TO_CHECK = 150; // New constant
 const HEURISTIC_SCORE_THRESHOLD = 2.5;
 const HEURISTIC_MIN_NAME_SIMILARITY = 0.65;
 // ---
@@ -1243,7 +1243,7 @@ async function searchDblpForCandidates(authorName: string): Promise<any[]> {
     const url = new URL(DBLP_API_AUTHOR_SEARCH_URL);
     url.searchParams.set('q', authorName);
     url.searchParams.set('format', 'json');
-    url.searchParams.set('h', '10');
+    url.searchParams.set('h', '500'); // Fetch more results for better hub detection
     try {
         const resp = await fetch(url.toString());
         if (resp.status === 429) {
@@ -1255,13 +1255,80 @@ async function searchDblpForCandidates(authorName: string): Promise<any[]> {
         }
         const data = await resp.json();
         const hits = data.result?.hits?.hit;
-        return Array.isArray(hits) ? hits : hits ? [hits] : [];
+        const initialCandidates = Array.isArray(hits) ? hits : hits ? [hits] : [];
+
+        if (initialCandidates.length === 0) return [];
+
+        // Find the most common base PID from the search results
+        const basePidCounts: Record<string, number> = {};
+        for (const hit of initialCandidates) {
+            const pid = extractPidFromUrl(hit.info.url);
+            if (pid) {
+                const basePid = pid.split('-')[0];
+                basePidCounts[basePid] = (basePidCounts[basePid] || 0) + 1;
+            }
+        }
+        
+        let mostCommonBasePid: string | null = null;
+        let maxCount = 0;
+        for (const basePid in basePidCounts) {
+            if (basePidCounts[basePid] > maxCount) {
+                maxCount = basePidCounts[basePid];
+                mostCommonBasePid = basePid;
+            }
+        }
+
+        // If a hub is detected, generate potential candidates programmatically
+        if (mostCommonBasePid && maxCount > 4) {
+            console.log(`GSR: Detected likely DBLP hub with base PID "${mostCommonBasePid}". Generating variants to test.`);
+            const generatedCandidates: any[] = [];
+            for (let i = 1; i <= DBLP_MAX_HUB_VARIANTS_TO_CHECK; i++) {
+                const newPid = `${mostCommonBasePid}-${i}`;
+                generatedCandidates.push({
+                    info: {
+                        author: `${authorName} (Variant ${i})`,
+                        url: `https://dblp.org/pid/${newPid}.html`
+                    }
+                });
+            }
+            return generatedCandidates;
+        }
+        
+        console.log("GSR: No obvious DBLP hub detected. Proceeding with raw API results.");
+        return initialCandidates;
+
     } catch (error) {
         if (error instanceof DblpRateLimitError) throw error;
-        console.error("DBLP candidate search fetch failed:", error);
-        throw new DblpRateLimitError("DBLP connection failed during author search.");
+        console.error("GSR: DBLP candidate search fetch failed:", error);
+        throw new Error("DBLP connection failed during author search.");
+    }
+
+}
+
+
+async function fetchDblpPubsForCheck(pid: string): Promise<{ title: string; year: string | null }[]> {
+    const authorUri = `https://dblp.org/pid/${pid}`;
+    const query = `PREFIX dblp: <https://dblp.org/rdf/schema#> SELECT ?title ?year WHERE { ?paper dblp:authoredBy <${authorUri}> . ?paper dblp:title ?title . OPTIONAL { ?paper dblp:yearOfPublication ?year . } } LIMIT 200`;
+    const url = `${DBLP_SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}&output=json`;
+    try {
+        const response = await fetch(url, { headers: { 'Accept': 'application/sparql-results+json' } });
+        if (response.status === 429) {
+            throw new DblpRateLimitError("DBLP SPARQL endpoint rate limit hit.");
+        }
+        if (!response.ok) {
+            // This is an expected failure for non-existent PIDs, so we don't log an error.
+            throw new Error(`SPARQL query failed for PID ${pid} with status ${response.status}`);
+        }
+        const json = await response.json();
+        return json.results.bindings.map((b: any) => ({ title: b.title.value, year: b.year ? b.year.value : null }));
+    } catch (error) {
+        if (error instanceof DblpRateLimitError) throw error;
+        // Re-throw other errors so the "guess and check" can catch them.
+        throw new Error(`SPARQL connection failed for PID ${pid}: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
+
+
 
 function extractPidFromUrl(url: string): string | null {
     let match = url.match(/pid\/([^/]+\/[^.]+)/i); if (match?.[1]) return match[1];
@@ -1302,57 +1369,6 @@ async function fetchDblpPublicationsViaSparql(pid: string): Promise<{ title: str
 
 
 
-// --- NEW: Resilient publication fetcher for heuristic check ---
-async function getDblpPubsForHeuristicCheck(
-  pid: string
-): Promise<{ title: string; year: string | null }[]> {
-  // --- Primary Method: SPARQL ---
-  try {
-    const publications = await fetchDblpPublicationsViaSparql(pid);
-    // If SPARQL works and returns results, we use them.
-    if (publications.length > 0) {
-      console.log(`GSR Heuristic: Successfully fetched ${publications.length} pubs for PID ${pid} via SPARQL.`);
-      return publications;
-    }
-    // If SPARQL returns 0 results, it might be a transient issue or an author with no listed pubs.
-    // We'll log a warning and proceed to the fallback, just in case.
-    console.warn(`GSR Heuristic: SPARQL for PID ${pid} returned 0 results. Proceeding to XML fallback to confirm.`);
-  } catch (error) {
-    console.warn(
-      `GSR Heuristic: SPARQL fetch for PID ${pid} failed. Using XML API fallback.`,
-      error
-    );
-  }
-
-  // --- Fallback Method: XML API ---
-  // This code runs if the try block above fails or falls through.
-  try {
-    console.log(`GSR Heuristic: Executing XML API fallback for PID ${pid}.`);
-    // We reuse the existing function that fetches from the XML endpoint.
-    // Note: We pass no statusElement, so it won't update the main UI during this background check.
-    const dblpEntries = await fetchPublicationsFromDblp(pid);
-    
-    // We adapt the output to match the format expected by the heuristic checker.
-    return dblpEntries.map(entry => ({
-      title: entry.title,
-      year: entry.year,
-    }));
-  } catch (fallbackError) {
-    console.error(
-      `GSR Heuristic: XML API fallback also failed for PID ${pid}. Cannot verify this candidate.`,
-      fallbackError
-    );
-    // If both methods fail, we return an empty array.
-    return [];
-  }
-}
-
-// async function findBestDblpProfile...
-
-
-
-
-
 
 // in content.ts
 
@@ -1363,27 +1379,27 @@ async function findBestDblpProfile(scholarName: string, scholarSamplePubs: Schol
     
     const scholarTitles = scholarSamplePubs.map(p => p.title);
 
-    for (const candidate of candidates) {
-        if (!candidate.info || !candidate.info.author || !candidate.info.url) continue;
-
-        const dblpName = candidate.info.author.replace(/\s\d{4}$/, '');
-        const nameSimilarity = jaroWinkler(scholarName.toLowerCase(), dblpName.toLowerCase());
-
-        if (nameSimilarity < HEURISTIC_MIN_NAME_SIMILARITY) continue;
-
+    for (const [index, candidate] of candidates.entries()) {
+        const dblpName = candidate.info.author.replace(/\s\d{4}$/, '').replace(/\s+\(Variant \d+\)$/, '').trim();
         const pid = extractPidFromUrl(candidate.info.url);
+
         if (!pid) continue;
+
+        const nameSimilarity = jaroWinkler(scholarName.toLowerCase(), dblpName.toLowerCase());
+        if (nameSimilarity < HEURISTIC_MIN_NAME_SIMILARITY) continue;
+        
+        let dblpPublications;
+        try {
+            // This is the "check" part of "guess and check". It will throw an error if the PID does not exist.
+            dblpPublications = await fetchDblpPubsForCheck(pid);
+            if (dblpPublications.length === 0) continue; // Valid PID but no publications, skip.
+        } catch (error) {
+            // This PID is invalid or fetch failed. This is expected. We just continue to the next guess.
+            continue;
+        }
 
         let currentScore = nameSimilarity * 2.0;
         let overlapCount = 0;
-        
-        // --- MODIFIED LINE ---
-        // OLD: const dblpPublications = await fetchDblpPublicationsViaSparql(pid);
-        // NEW: Call the resilient helper function instead.
-        const dblpPublications = await getDblpPubsForHeuristicCheck(pid);
-        // --- END MODIFICATION ---
-
-        if (dblpPublications.length === 0) continue;
 
         for (const scholarTitle of scholarTitles) {
             for (const dblpPub of dblpPublications) {
@@ -1398,6 +1414,7 @@ async function findBestDblpProfile(scholarName: string, scholarSamplePubs: Schol
         if (currentScore > highestScore && overlapCount >= DBLP_HEURISTIC_MIN_OVERLAP_COUNT) {
             highestScore = currentScore;
             bestPid = pid;
+            console.log(`GSR: New best DBLP candidate found! PID: ${pid}, Score: ${currentScore.toFixed(2)}, Overlap: ${overlapCount}`);
         }
     }
     
