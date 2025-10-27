@@ -34,8 +34,7 @@ const VALID_RANKS = ["A*", "A", "B", "C"]; // Added string[] type
 const SJR_QUARTILES = ["Q1", "Q2", "Q3", "Q4"];
 const IGNORE_KEYWORDS = [
     "workshop", "transactions", "poster", "demo", "abstract",
-    "extended abstract", "doctoral consortium", "doctoral symposium",
-    "computer communication review", "companion", "adjunct", "technical report",
+    "extended abstract", "doctoral consortium", "doctoral symposium", "adjunct", "technical report",
     "tech report", "industry track", "tutorial notes", "working notes"
 ];
 const STATUS_ELEMENT_ID = 'scholar-ranker-status-progress';
@@ -619,85 +618,112 @@ function stripOrgPrefixes(text) {
     return currentText;
 }
 function findRankForVenue(venueKey, coreData, fullVenueTitle = undefined) {
-    if (!venueKey || !venueKey.trim())
-        return "N/A";
-    const keyLower = venueKey.toLowerCase().trim();
+    const trimmedVenueKey = venueKey?.trim();
+    const keyLower = trimmedVenueKey ? trimmedVenueKey.toLowerCase() : "";
     /* ---------- 1. exact-acronym match ---------- */
-    const acronymMatches = coreData.filter(e => e.acronym && e.acronym.toLowerCase() === keyLower);
-    /* 1-a  single hit → done */
-    if (acronymMatches.length === 1) {
-        const rank = acronymMatches[0].rank;
-        return VALID_RANKS.includes(rank) ? rank : "N/A";
-    }
-    /* 1-b  ambiguous acronym → log & try title disambiguation */
-    if (acronymMatches.length > 1) {
-        console.log(`[Rank] Acronym '${venueKey}' matched ${acronymMatches.length} CORE rows.`, acronymMatches.map(e => ({ title: e.title, rank: e.rank })));
-        if (fullVenueTitle) {
-            const cleanedFull = cleanTextForComparison(fullVenueTitle, false);
-            let bestScore = 0;
-            let bestEntry = null;
-            for (const entry of acronymMatches) {
-                if (!entry.title)
-                    continue;
-                const score = jaroWinkler(cleanedFull, cleanTextForComparison(entry.title, false));
-                console.log(`  ↳ JW score vs "${entry.title}": ${score.toFixed(3)}`);
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestEntry = entry;
+    if (trimmedVenueKey) {
+        const acronymMatches = coreData.filter(e => e.acronym && e.acronym.toLowerCase() === keyLower);
+        /* 1-a  single hit → done */
+        if (acronymMatches.length === 1) {
+            const rank = acronymMatches[0].rank;
+            return VALID_RANKS.includes(rank) ? rank : "N/A";
+        }
+        /* 1-b  ambiguous acronym → log & try title disambiguation */
+        if (acronymMatches.length > 1) {
+            console.log(`[Rank] Acronym '${venueKey}' matched ${acronymMatches.length} CORE rows.`, acronymMatches.map(e => ({ title: e.title, rank: e.rank })));
+            if (fullVenueTitle) {
+                const cleanedFull = cleanTextForComparison(fullVenueTitle, false);
+                let bestScore = 0;
+                let bestEntry = null;
+                for (const entry of acronymMatches) {
+                    if (!entry.title)
+                        continue;
+                    const score = jaroWinkler(cleanedFull, cleanTextForComparison(entry.title, false));
+                    console.log(`  ↳ JW score vs "${entry.title}": ${score.toFixed(3)}`);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestEntry = entry;
+                    }
+                    if (score === 1)
+                        break; // perfect match
                 }
-                if (score === 1)
-                    break; // perfect match
+                if (bestEntry &&
+                    bestScore >= 0.85 &&
+                    VALID_RANKS.includes(bestEntry.rank)) {
+                    console.log(`[Rank]   ► Disambiguated by title → "${bestEntry.title}" (${bestEntry.rank})`);
+                    return bestEntry.rank;
+                }
+                console.log(`[Rank]   ► Title disambiguation failed (best score ${bestScore.toFixed(3)}). Returning N/A.`);
             }
-            if (bestEntry &&
-                bestScore >= 0.85 &&
-                VALID_RANKS.includes(bestEntry.rank)) {
-                console.log(`[Rank]   ► Disambiguated by title → "${bestEntry.title}" (${bestEntry.rank})`);
-                return bestEntry.rank;
+            else {
+                console.log(`[Rank]   ► No fullVenueTitle provided – cannot disambiguate. Returning N/A.`);
             }
-            console.log(`[Rank]   ► Title disambiguation failed (best score ${bestScore.toFixed(3)}). Returning N/A.`);
+            return "N/A"; // ← new behaviour
         }
-        else {
-            console.log(`[Rank]   ► No fullVenueTitle provided – cannot disambiguate. Returning N/A.`);
-        }
-        return "N/A"; // ← new behaviour
     }
-    /* ---------- 2. substring containment (unchanged) ---------- */
-    const gsCleaned = cleanTextForComparison(keyLower, true);
-    if (!gsCleaned)
+    const candidates = [];
+    if (trimmedVenueKey) {
+        candidates.push({ raw: keyLower, isScholar: true });
+    }
+    if (fullVenueTitle && fullVenueTitle.trim().length > 0) {
+        candidates.push({ raw: fullVenueTitle.toLowerCase(), isScholar: false });
+    }
+    if (candidates.length === 0) {
         return "N/A";
-    let bestSubRank = null;
-    let longestLen = 0;
-    for (const entry of coreData) {
-        if (!entry.title)
-            continue;
-        let coreTitle = cleanTextForComparison(entry.title, false);
-        coreTitle = stripOrgPrefixes(coreTitle);
-        if (gsCleaned.includes(coreTitle) && coreTitle.length > longestLen) {
-            longestLen = coreTitle.length;
-            bestSubRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
-        }
     }
-    if (bestSubRank)
+    const trySubstringMatch = (gsCleaned) => {
+        let bestSubRank = null;
+        let longestLen = 0;
+        for (const entry of coreData) {
+            if (!entry.title)
+                continue;
+            let coreTitle = cleanTextForComparison(entry.title, false);
+            coreTitle = stripOrgPrefixes(coreTitle);
+            if (!coreTitle)
+                continue;
+            if (gsCleaned.includes(coreTitle) && coreTitle.length > longestLen) {
+                longestLen = coreTitle.length;
+                bestSubRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+            }
+        }
         return bestSubRank;
-    /* ---------- 3. fuzzy JW (unchanged) ---------- */
-    let bestFuzzy = 0;
-    let fuzzyRank = null;
-    for (const entry of coreData) {
-        if (!entry.title)
-            continue;
-        let coreTitle = cleanTextForComparison(entry.title, false);
-        coreTitle = stripOrgPrefixes(coreTitle);
-        if (coreTitle.length < 6 || gsCleaned.length < 6)
-            continue;
-        const score = jaroWinkler(gsCleaned, coreTitle);
-        if (score >= FUZZY_THRESHOLD && score > bestFuzzy) {
-            bestFuzzy = score;
-            fuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
-            if (score === 1)
-                break;
+    };
+    const tryFuzzyMatch = (gsCleaned) => {
+        let bestFuzzy = 0;
+        let fuzzyRank = null;
+        for (const entry of coreData) {
+            if (!entry.title)
+                continue;
+            let coreTitle = cleanTextForComparison(entry.title, false);
+            coreTitle = stripOrgPrefixes(coreTitle);
+            if (!coreTitle)
+                continue;
+            if (coreTitle.length < 6 || gsCleaned.length < 6)
+                continue;
+            const score = jaroWinkler(gsCleaned, coreTitle);
+            if (score >= FUZZY_THRESHOLD && score > bestFuzzy) {
+                bestFuzzy = score;
+                fuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+                if (score === 1)
+                    break;
+            }
         }
+        return fuzzyRank;
+    };
+    const seenCleaned = new Set();
+    for (const candidate of candidates) {
+        const cleaned = cleanTextForComparison(candidate.raw, candidate.isScholar);
+        if (!cleaned || seenCleaned.has(cleaned))
+            continue;
+        seenCleaned.add(cleaned);
+        const subRank = trySubstringMatch(cleaned);
+        if (subRank)
+            return subRank;
+        const fuzzyRank = tryFuzzyMatch(cleaned);
+        if (fuzzyRank)
+            return fuzzyRank;
     }
-    return fuzzyRank ?? "N/A";
+    return "N/A";
 }
 function extractPotentialAcronymsFromText(scholarVenueName) {
     const acronyms = new Set();
@@ -1042,11 +1068,11 @@ function displaySummaryPanel(coreRankCounts, sjrRankCounts, currentUserId, initi
         list.style.listStyle = 'none';
         list.style.padding = '0';
         list.style.margin = '0';
-        const nonNaRanks = orderedRanks.filter(rank => rank !== 'N/A');
-        let maxCountForScale = Math.max(10, ...nonNaRanks.map(rank => counts[rank] || 0));
+        const displayRanks = orderedRanks.filter(rank => rank !== 'N/A');
+        let maxCountForScale = Math.max(10, ...displayRanks.map(rank => counts[rank] || 0));
         if (!Number.isFinite(maxCountForScale) || maxCountForScale <= 0)
             maxCountForScale = 10;
-        for (const rank of orderedRanks) {
+        for (const rank of displayRanks) {
             const count = counts[rank] || 0;
             const listItem = document.createElement('li');
             listItem.style.display = 'flex';
@@ -1067,29 +1093,22 @@ function displaySummaryPanel(coreRankCounts, sjrRankCounts, currentUserId, initi
                 rankLabel.style.marginRight = '8px';
                 listItem.appendChild(rankLabel);
             }
-            if (rank !== 'N/A') {
-                const barContainer = document.createElement('div');
-                barContainer.style.flexGrow = '1';
-                barContainer.style.backgroundColor = '#f0f0f0';
-                barContainer.style.height = '16px';
-                barContainer.style.borderRadius = '2px';
-                barContainer.style.marginRight = '8px';
-                const barFill = document.createElement('div');
-                const badgeColor = badge?.style.backgroundColor || (system === 'SJR' ? '#9d8df1' : '#76C7C0');
-                const percentageWidth = maxCountForScale > 0 ? (count / maxCountForScale) * 100 : 0;
-                barFill.style.width = `${Math.min(percentageWidth, 100)}%`;
-                barFill.style.height = '100%';
-                barFill.style.backgroundColor = badgeColor;
-                barFill.style.borderRadius = '2px';
-                barFill.style.transition = 'width 0.5s ease-out';
-                barContainer.appendChild(barFill);
-                listItem.appendChild(barContainer);
-            }
-            else {
-                const spacer = document.createElement('div');
-                spacer.style.flexGrow = '1';
-                listItem.appendChild(spacer);
-            }
+            const barContainer = document.createElement('div');
+            barContainer.style.flexGrow = '1';
+            barContainer.style.backgroundColor = '#f0f0f0';
+            barContainer.style.height = '16px';
+            barContainer.style.borderRadius = '2px';
+            barContainer.style.marginRight = '8px';
+            const barFill = document.createElement('div');
+            const badgeColor = badge?.style.backgroundColor || (system === 'SJR' ? '#9d8df1' : '#76C7C0');
+            const percentageWidth = maxCountForScale > 0 ? (count / maxCountForScale) * 100 : 0;
+            barFill.style.width = `${Math.min(percentageWidth, 100)}%`;
+            barFill.style.height = '100%';
+            barFill.style.backgroundColor = badgeColor;
+            barFill.style.borderRadius = '2px';
+            barFill.style.transition = 'width 0.5s ease-out';
+            barContainer.appendChild(barFill);
+            listItem.appendChild(barContainer);
             const countTextSpan = document.createElement('span');
             countTextSpan.textContent = `${count} paper${count === 1 ? '' : 's'}`;
             countTextSpan.style.minWidth = '60px';
