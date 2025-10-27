@@ -1081,11 +1081,11 @@ function displaySummaryPanel(
         list.style.padding = '0';
         list.style.margin = '0';
 
-        const nonNaRanks = orderedRanks.filter(rank => rank !== 'N/A');
-        let maxCountForScale = Math.max(10, ...nonNaRanks.map(rank => counts[rank] || 0));
+        const displayRanks = orderedRanks.filter(rank => rank !== 'N/A');
+        let maxCountForScale = Math.max(10, ...displayRanks.map(rank => counts[rank] || 0));
         if (!Number.isFinite(maxCountForScale) || maxCountForScale <= 0) maxCountForScale = 10;
 
-        for (const rank of orderedRanks) {
+        for (const rank of displayRanks) {
             const count = counts[rank] || 0;
             const listItem = document.createElement('li');
             listItem.style.display = 'flex';
@@ -1107,30 +1107,24 @@ function displaySummaryPanel(
                 listItem.appendChild(rankLabel);
             }
 
-            if (rank !== 'N/A') {
-                const barContainer = document.createElement('div');
-                barContainer.style.flexGrow = '1';
-                barContainer.style.backgroundColor = '#f0f0f0';
-                barContainer.style.height = '16px';
-                barContainer.style.borderRadius = '2px';
-                barContainer.style.marginRight = '8px';
+            const barContainer = document.createElement('div');
+            barContainer.style.flexGrow = '1';
+            barContainer.style.backgroundColor = '#f0f0f0';
+            barContainer.style.height = '16px';
+            barContainer.style.borderRadius = '2px';
+            barContainer.style.marginRight = '8px';
 
-                const barFill = document.createElement('div');
-                const badgeColor = badge?.style.backgroundColor || (system === 'SJR' ? '#9d8df1' : '#76C7C0');
-                const percentageWidth = maxCountForScale > 0 ? (count / maxCountForScale) * 100 : 0;
-                barFill.style.width = `${Math.min(percentageWidth, 100)}%`;
-                barFill.style.height = '100%';
-                barFill.style.backgroundColor = badgeColor;
-                barFill.style.borderRadius = '2px';
-                barFill.style.transition = 'width 0.5s ease-out';
+            const barFill = document.createElement('div');
+            const badgeColor = badge?.style.backgroundColor || (system === 'SJR' ? '#9d8df1' : '#76C7C0');
+            const percentageWidth = maxCountForScale > 0 ? (count / maxCountForScale) * 100 : 0;
+            barFill.style.width = `${Math.min(percentageWidth, 100)}%`;
+            barFill.style.height = '100%';
+            barFill.style.backgroundColor = badgeColor;
+            barFill.style.borderRadius = '2px';
+            barFill.style.transition = 'width 0.5s ease-out';
 
-                barContainer.appendChild(barFill);
-                listItem.appendChild(barContainer);
-            } else {
-                const spacer = document.createElement('div');
-                spacer.style.flexGrow = '1';
-                listItem.appendChild(spacer);
-            }
+            barContainer.appendChild(barFill);
+            listItem.appendChild(barContainer);
 
             const countTextSpan = document.createElement('span');
             countTextSpan.textContent = `${count} paper${count === 1 ? '' : 's'}`;
