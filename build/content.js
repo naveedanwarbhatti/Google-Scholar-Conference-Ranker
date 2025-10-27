@@ -7,31 +7,41 @@ class DblpRateLimitError extends Error {
         this.name = 'DblpRateLimitError';
     }
 }
+function createEmptyCoreRankCounts() {
+    return { 'A*': 0, 'A': 0, 'B': 0, 'C': 0, 'N/A': 0 };
+}
+function createEmptySjrRankCounts() {
+    return { 'Q1': 0, 'Q2': 0, 'Q3': 0, 'Q4': 0, 'N/A': 0 };
+}
 /** array → map */
 function packRanks(arr) {
     const obj = {};
-    for (const { url, rank } of arr)
-        obj[url] = rank;
+    for (const { url, rank, system } of arr) {
+        obj[url] = { rank, system };
+    }
     return obj;
 }
 /** map → array (titleText stays empty – it is never used after load) */
 function unpackRanks(map) {
-    return Object.entries(map).map(([url, rank]) => ({
+    return Object.entries(map).map(([url, entry]) => ({
         url,
-        rank,
+        rank: entry.rank,
+        system: entry.system ?? 'UNKNOWN',
         titleText: ""
     }));
 }
 const VALID_RANKS = ["A*", "A", "B", "C"]; // Added string[] type
+const SJR_QUARTILES = ["Q1", "Q2", "Q3", "Q4"];
 const IGNORE_KEYWORDS = [
-    "workshop", "transactions", "journal", "poster", "demo", "abstract",
+    "workshop", "transactions", "poster", "demo", "abstract",
     "extended abstract", "doctoral consortium", "doctoral symposium",
     "computer communication review", "companion", "adjunct", "technical report",
     "tech report", "industry track", "tutorial notes", "working notes"
 ];
 const STATUS_ELEMENT_ID = 'scholar-ranker-status-progress';
 const SUMMARY_PANEL_ID = 'scholar-ranker-summary';
-const CACHE_PREFIX = 'scholarRanker_profile_';
+const CACHE_VERSION = 2;
+const CACHE_PREFIX = `scholarRanker_profile_v${CACHE_VERSION}_`;
 const CACHE_DURATION_MS = Number.POSITIVE_INFINITY; // never expires
 const DBLP_CACHE_DURATION_MS = Number.POSITIVE_INFINITY; // never expires
 console.log("Google Scholar Ranker: Content script loaded (vDBLP_Auto_Integration_Fix1).");
@@ -39,7 +49,7 @@ const coreDataCache = {};
 let isMainProcessing = false;
 let activeCachedPublicationRanks = null;
 let publicationTableObserver = null;
-let rankMapForObserver = null; // Maps URL to Rank
+let rankMapForObserver = null; // Maps URL to rank & system
 // --- START: DBLP Constants & Globals (UPDATED with new logic) ---
 const DBLP_API_AUTHOR_SEARCH_URL = "https://dblp.org/search/author/api";
 const DBLP_API_PERSON_PUBS_URL_PREFIX = "https://dblp.org/pid/";
@@ -138,8 +148,9 @@ async function loadCachedData(userId) {
         }
         if (result && result[cacheKey]) {
             const data = result[cacheKey];
-            const timeSinceCache = Date.now() - data.timestamp;
-            return data;
+            if (data.version === CACHE_VERSION) {
+                return data;
+            }
         }
     }
     catch (error) {
@@ -147,10 +158,12 @@ async function loadCachedData(userId) {
     }
     return null;
 }
-async function saveCachedData(userId, rankCounts, publicationRanks, dblpAuthorPid) {
+async function saveCachedData(userId, coreRankCounts, sjrRankCounts, publicationRanks, dblpAuthorPid) {
     const cacheKey = getCacheKey(userId);
     const dataToStore = {
-        rankCounts,
+        version: CACHE_VERSION,
+        coreRankCounts,
+        sjrRankCounts,
         publicationRanks: packRanks(publicationRanks),
         timestamp: Date.now(),
         dblpAuthorPid: dblpAuthorPid || undefined,
@@ -388,6 +401,111 @@ async function fetchVenueAndYear(publicationUrl) {
     }
     return { venueName, publicationYear };
 }
+function normalizeJournalName(name) {
+    if (!name)
+        return "";
+    return cleanTextForComparison(name, false);
+}
+const SJR_SEARCH_BASE_URL = 'https://www.scimagojr.com/journalsearch.php';
+const SJR_PROXY_PREFIX = 'https://r.jina.ai/';
+const MAX_SJR_CANDIDATES = 8;
+const sjrLookupCache = new Map();
+async function fetchScimagoText(url) {
+    try {
+        const proxiedUrl = `${SJR_PROXY_PREFIX}${url}`;
+        const response = await fetch(proxiedUrl);
+        if (!response.ok) {
+            return null;
+        }
+        return await response.text();
+    }
+    catch (error) {
+        console.warn('SJR fetch error for', url, error);
+        return null;
+    }
+}
+function extractCandidateIdsFromSearch(text) {
+    const ids = new Set();
+    const regex = /journalsearch\.php\?q=(\d+)&tip=sid/gi;
+    let match;
+    while ((match = regex.exec(text)) && ids.size < MAX_SJR_CANDIDATES) {
+        ids.add(match[1]);
+    }
+    return Array.from(ids);
+}
+function extractSjrTitle(text) {
+    const titleMatch = text.match(/^Title:\s*(.+)$/m);
+    if (titleMatch && titleMatch[1]) {
+        return titleMatch[1].trim();
+    }
+    return null;
+}
+function parseSjrQuartileFromText(text) {
+    const quartileByYear = new Map();
+    const regex = /\|\s*(\d{4})\s*\|\s*(Q[1-4])\s*\|/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        const year = parseInt(match[1], 10);
+        if (Number.isNaN(year))
+            continue;
+        const quartileValue = match[2];
+        const quartileNumber = parseInt(quartileValue.substring(1), 10);
+        if (!quartileByYear.has(year) || quartileNumber < quartileByYear.get(year)) {
+            quartileByYear.set(year, quartileNumber);
+        }
+    }
+    if (quartileByYear.size === 0) {
+        return { quartile: null, year: null };
+    }
+    const sortedYears = Array.from(quartileByYear.keys()).sort((a, b) => b - a);
+    const latestYear = sortedYears[0];
+    const bestQuartileNumber = quartileByYear.get(latestYear);
+    return { quartile: `Q${bestQuartileNumber}`, year: latestYear };
+}
+async function resolveSjrQuartile(journalName) {
+    const normalizedQuery = normalizeJournalName(journalName);
+    if (!normalizedQuery)
+        return null;
+    if (sjrLookupCache.has(normalizedQuery)) {
+        return sjrLookupCache.get(normalizedQuery) ?? null;
+    }
+    const searchUrl = `${SJR_SEARCH_BASE_URL}?q=${encodeURIComponent(journalName)}&tip=jou`;
+    const searchText = await fetchScimagoText(searchUrl);
+    if (!searchText) {
+        sjrLookupCache.set(normalizedQuery, null);
+        return null;
+    }
+    const candidateIds = extractCandidateIdsFromSearch(searchText);
+    if (candidateIds.length === 0) {
+        sjrLookupCache.set(normalizedQuery, null);
+        return null;
+    }
+    let bestMatch = null;
+    for (const candidateId of candidateIds) {
+        const detailUrl = `${SJR_SEARCH_BASE_URL}?q=${candidateId}&tip=sid&clean=0`;
+        const detailText = await fetchScimagoText(detailUrl);
+        if (!detailText)
+            continue;
+        const resolvedTitle = extractSjrTitle(detailText);
+        if (!resolvedTitle)
+            continue;
+        const normalizedResolved = normalizeJournalName(resolvedTitle);
+        if (!normalizedResolved)
+            continue;
+        const similarity = jaroWinkler(normalizedQuery, normalizedResolved);
+        const { quartile, year } = parseSjrQuartileFromText(detailText);
+        const candidateResult = { quartile, year, resolvedTitle };
+        if (!bestMatch || similarity > bestMatch.score) {
+            bestMatch = { score: similarity, result: candidateResult };
+        }
+        if (similarity >= 0.98) {
+            break;
+        }
+    }
+    const finalResult = bestMatch?.result ?? null;
+    sjrLookupCache.set(normalizedQuery, finalResult);
+    return finalResult;
+}
 const COMMON_ABBREVIATIONS = { "int'l": "international", "intl": "international", "conf\\.": "conference", "conf": "conference", "proc\\.": "proceedings", "proc": "proceedings", "symp\\.": "symposium", "symp": "symposium", "j\\.": "journal", "jour": "journal", "trans\\.": "transactions", "trans": "transactions", "annu\\.": "annual", "comput\\.": "computing", "commun\\.": "communications", "syst\\.": "systems", "sci\\.": "science", "tech\\.": "technical", "technol": "technology", "engin\\.": "engineering", "res\\.": "research", "adv\\.": "advances", "appl\\.": "applications", "lectures notes": "lecture notes", "lect notes": "lecture notes", "lncs": "lecture notes in computer science", };
 function cleanTextForComparison(text, isGoogleScholarVenue = false) {
     if (!text)
@@ -602,28 +720,53 @@ function extractPotentialAcronymsFromText(scholarVenueName) {
     }
     return Array.from(acronyms);
 }
-function createRankBadgeElement(rank) {
-    if (!VALID_RANKS.includes(rank) && rank !== "N/A")
-        return null;
+function createRankBadgeElement(rank, system) {
     const badge = document.createElement('span');
     badge.textContent = rank;
-    badge.style.display = 'inline-block';
-    badge.style.padding = '2px 6px';
+    badge.style.display = 'inline-flex';
+    badge.style.alignItems = 'center';
+    badge.style.justifyContent = 'center';
     badge.style.marginLeft = '10px';
     badge.style.fontSize = '0.9em';
     badge.style.fontWeight = 'bold';
     badge.style.color = '#000000';
-    badge.style.border = '1px solid #ccc';
-    badge.style.borderRadius = '3px';
     badge.style.verticalAlign = 'middle';
-    badge.style.minWidth = '30px';
-    badge.style.textAlign = 'center';
-    if (rank === "N/A") {
+    const applyNeutralStyle = () => {
         badge.style.backgroundColor = '#f0f0f0';
         badge.style.borderColor = '#bdbdbd';
         badge.style.color = '#555';
+    };
+    if (system === 'SJR' && SJR_QUARTILES.includes(rank)) {
+        badge.style.border = '2px solid #ccc';
+        badge.style.borderRadius = '50%';
+        badge.style.minWidth = '30px';
+        badge.style.height = '30px';
+        switch (rank) {
+            case 'Q1':
+                badge.style.backgroundColor = '#FFD700';
+                badge.style.borderColor = '#B8860B';
+                break;
+            case 'Q2':
+                badge.style.backgroundColor = '#90EE90';
+                badge.style.borderColor = '#3CB371';
+                break;
+            case 'Q3':
+                badge.style.backgroundColor = '#ADFF2F';
+                badge.style.borderColor = '#7FFF00';
+                break;
+            case 'Q4':
+                badge.style.backgroundColor = '#FFA07A';
+                badge.style.borderColor = '#FA8072';
+                break;
+        }
+        return badge;
     }
-    else {
+    if (system === 'CORE' && VALID_RANKS.includes(rank)) {
+        badge.style.border = '1px solid #ccc';
+        badge.style.borderRadius = '3px';
+        badge.style.padding = '2px 6px';
+        badge.style.minWidth = '30px';
+        badge.style.textAlign = 'center';
         switch (rank) {
             case "A*":
                 badge.style.backgroundColor = '#FFD700';
@@ -642,10 +785,21 @@ function createRankBadgeElement(rank) {
                 badge.style.borderColor = '#FA8072';
                 break;
         }
+        return badge;
     }
-    return badge;
+    if (rank === 'N/A') {
+        badge.style.border = system === 'SJR' ? '2px solid #ccc' : '1px solid #ccc';
+        badge.style.borderRadius = system === 'SJR' ? '50%' : '3px';
+        badge.style.padding = system === 'SJR' ? '0' : '2px 6px';
+        badge.style.minWidth = '30px';
+        badge.style.height = system === 'SJR' ? '30px' : '';
+        badge.style.textAlign = system === 'SJR' ? 'center' : 'center';
+        applyNeutralStyle();
+        return badge;
+    }
+    return null;
 }
-function displayRankBadgeAfterTitle(rowElement, rank) {
+function displayRankBadgeAfterTitle(rowElement, rank, system) {
     const titleCell = rowElement.querySelector('td.gsc_a_t');
     if (titleCell) {
         const oldBadge = titleCell.querySelector('span.gsr-rank-badge-inline');
@@ -660,7 +814,7 @@ function displayRankBadgeAfterTitle(rowElement, rank) {
     const titleLinkElement = rowElement.querySelector('td.gsc_a_t a.gsc_a_at');
     if (!titleLinkElement)
         return;
-    const badge = createRankBadgeElement(rank); // This can return N/A badge or null
+    const badge = createRankBadgeElement(rank, system); // This can return N/A badge or null
     if (badge) {
         badge.classList.add('gsr-rank-badge-inline');
         badge.style.marginLeft = '8px';
@@ -679,7 +833,7 @@ function createStatusElement(initialMessage = "Initializing...") {
     container.style.padding = '10px';
     container.style.marginBottom = '15px';
     const title = document.createElement('div');
-    title.textContent = "CORE Rank Processing";
+    title.textContent = "Rank Processing";
     title.style.fontSize = '14px';
     title.style.fontWeight = 'bold';
     title.style.color = '#777';
@@ -747,7 +901,7 @@ function updateStatusElement(statusContainer, processed, total, messagePrefix) {
     if (statusText)
         statusText.textContent = `${prefix}Processing ${processed} / ${total}...`;
 }
-function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, cacheTimestamp, dblpAuthorPid // New parameter for DBLP PID
+function displaySummaryPanel(coreRankCounts, sjrRankCounts, currentUserId, initialCachedPubRanks, cacheTimestamp, dblpAuthorPid // New parameter for DBLP PID
 ) {
     document.getElementById(STATUS_ELEMENT_ID)?.remove();
     document.getElementById(SUMMARY_PANEL_ID)?.remove();
@@ -768,7 +922,7 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
     headerDiv.style.paddingBottom = '5px';
     headerDiv.style.borderBottom = '1px solid #e0e0e0';
     const summaryTitle = document.createElement('span');
-    summaryTitle.textContent = 'CORE Rank Summary';
+    summaryTitle.textContent = 'Ranking Summary';
     headerDiv.appendChild(summaryTitle);
     if (currentUserId) {
         const refreshButton = document.createElement('button');
@@ -786,7 +940,7 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
         refreshButton.style.display = 'inline-flex';
         refreshButton.style.alignItems = 'center';
         refreshButton.style.cursor = 'pointer';
-        refreshButton.setAttribute('title', 'Recalculate CORE ranks');
+        refreshButton.setAttribute('title', 'Recalculate rankings');
         refreshButton.onmouseenter = () => { refreshButton.style.backgroundColor = '#7CFC00'; refreshButton.style.borderColor = '#006400'; };
         refreshButton.onmouseleave = () => { refreshButton.style.backgroundColor = '#90EE90'; refreshButton.style.borderColor = '#77dd77'; };
         refreshButton.onclick = async () => {
@@ -826,90 +980,85 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
         headerDiv.appendChild(refreshButton);
     }
     panel.appendChild(headerDiv);
-    const list = document.createElement('ul');
-    list.style.listStyle = 'none';
-    list.style.padding = '0';
-    list.style.margin = '8px 0 0 0';
-    const ranksForChart = ["A*", "A", "B", "C"];
-    let maxCountForScale = 10;
-    ranksForChart.forEach(rank => { if ((rankCounts[rank] || 0) > maxCountForScale)
-        maxCountForScale = rankCounts[rank] || 0; });
-    if (maxCountForScale < 10)
-        maxCountForScale = 10;
-    else if (maxCountForScale > 10 && maxCountForScale < 15)
-        maxCountForScale = Math.ceil(maxCountForScale / 5) * 5;
-    const barChartColor = '#76C7C0';
-    const barHeight = '18px';
-    for (const rank of ["A*", "A", "B", "C", "N/A"]) {
-        const count = rankCounts[rank] || 0;
-        const listItem = document.createElement('li');
-        listItem.style.fontSize = '13px';
-        listItem.style.marginBottom = '6px';
-        listItem.style.display = 'flex';
-        listItem.style.alignItems = 'center';
-        const rankLabelSpan = document.createElement('span');
-        rankLabelSpan.style.display = 'inline-block';
-        rankLabelSpan.style.fontWeight = 'bold';
-        rankLabelSpan.style.marginRight = '8px';
-        rankLabelSpan.style.width = '35px';
-        if (VALID_RANKS.includes(rank)) {
-            rankLabelSpan.textContent = rank;
-            rankLabelSpan.style.padding = '1px 4px';
-            rankLabelSpan.style.fontSize = '0.9em';
-            rankLabelSpan.style.color = '#000000';
-            rankLabelSpan.style.border = '1px solid #ccc';
-            rankLabelSpan.style.borderRadius = '3px';
-            rankLabelSpan.style.textAlign = 'center';
-            switch (rank) {
-                case "A*":
-                    rankLabelSpan.style.backgroundColor = '#FFD700';
-                    rankLabelSpan.style.borderColor = '#B8860B';
-                    break;
-                case "A":
-                    rankLabelSpan.style.backgroundColor = '#90EE90';
-                    rankLabelSpan.style.borderColor = '#3CB371';
-                    break;
-                case "B":
-                    rankLabelSpan.style.backgroundColor = '#ADFF2F';
-                    rankLabelSpan.style.borderColor = '#7FFF00';
-                    break;
-                case "C":
-                    rankLabelSpan.style.backgroundColor = '#FFA07A';
-                    rankLabelSpan.style.borderColor = '#FA8072';
-                    break;
+    const summarySectionsContainer = document.createElement('div');
+    summarySectionsContainer.style.display = 'flex';
+    summarySectionsContainer.style.flexDirection = 'column';
+    summarySectionsContainer.style.gap = '16px';
+    summarySectionsContainer.style.marginTop = '8px';
+    const createSummarySection = (titleText, counts, orderedRanks, system) => {
+        const sectionWrapper = document.createElement('div');
+        const sectionTitle = document.createElement('div');
+        sectionTitle.textContent = titleText;
+        sectionTitle.style.fontSize = '13px';
+        sectionTitle.style.fontWeight = '600';
+        sectionTitle.style.color = '#555';
+        sectionTitle.style.marginBottom = '6px';
+        sectionWrapper.appendChild(sectionTitle);
+        const list = document.createElement('ul');
+        list.style.listStyle = 'none';
+        list.style.padding = '0';
+        list.style.margin = '0';
+        const nonNaRanks = orderedRanks.filter(rank => rank !== 'N/A');
+        let maxCountForScale = Math.max(10, ...nonNaRanks.map(rank => counts[rank] || 0));
+        if (!Number.isFinite(maxCountForScale) || maxCountForScale <= 0)
+            maxCountForScale = 10;
+        for (const rank of orderedRanks) {
+            const count = counts[rank] || 0;
+            const listItem = document.createElement('li');
+            listItem.style.display = 'flex';
+            listItem.style.alignItems = 'center';
+            listItem.style.fontSize = '13px';
+            listItem.style.marginBottom = '6px';
+            const badge = createRankBadgeElement(rank, system);
+            if (badge) {
+                badge.style.marginLeft = '0';
+                badge.style.marginRight = '8px';
+                badge.style.fontSize = '0.85em';
+                listItem.appendChild(badge);
             }
+            else {
+                const rankLabel = document.createElement('span');
+                rankLabel.textContent = `${rank}:`;
+                rankLabel.style.fontWeight = 'bold';
+                rankLabel.style.marginRight = '8px';
+                listItem.appendChild(rankLabel);
+            }
+            if (rank !== 'N/A') {
+                const barContainer = document.createElement('div');
+                barContainer.style.flexGrow = '1';
+                barContainer.style.backgroundColor = '#f0f0f0';
+                barContainer.style.height = '16px';
+                barContainer.style.borderRadius = '2px';
+                barContainer.style.marginRight = '8px';
+                const barFill = document.createElement('div');
+                const badgeColor = badge?.style.backgroundColor || (system === 'SJR' ? '#9d8df1' : '#76C7C0');
+                const percentageWidth = maxCountForScale > 0 ? (count / maxCountForScale) * 100 : 0;
+                barFill.style.width = `${Math.min(percentageWidth, 100)}%`;
+                barFill.style.height = '100%';
+                barFill.style.backgroundColor = badgeColor;
+                barFill.style.borderRadius = '2px';
+                barFill.style.transition = 'width 0.5s ease-out';
+                barContainer.appendChild(barFill);
+                listItem.appendChild(barContainer);
+            }
+            else {
+                const spacer = document.createElement('div');
+                spacer.style.flexGrow = '1';
+                listItem.appendChild(spacer);
+            }
+            const countTextSpan = document.createElement('span');
+            countTextSpan.textContent = `${count} paper${count === 1 ? '' : 's'}`;
+            countTextSpan.style.minWidth = '60px';
+            countTextSpan.style.textAlign = 'right';
+            listItem.appendChild(countTextSpan);
+            list.appendChild(listItem);
         }
-        else {
-            rankLabelSpan.textContent = `${rank}:`;
-            rankLabelSpan.style.width = 'auto';
-        }
-        listItem.appendChild(rankLabelSpan);
-        if (VALID_RANKS.includes(rank)) {
-            const barContainer = document.createElement('div');
-            barContainer.style.flexGrow = '1';
-            barContainer.style.backgroundColor = '#f0f0f0';
-            barContainer.style.height = barHeight;
-            barContainer.style.borderRadius = '2px';
-            barContainer.style.marginRight = '8px';
-            barContainer.style.position = 'relative';
-            const barFill = document.createElement('div');
-            const percentageWidth = maxCountForScale > 0 ? (count / maxCountForScale) * 100 : 0;
-            barFill.style.width = `${Math.min(percentageWidth, 100)}%`;
-            barFill.style.height = '100%';
-            barFill.style.backgroundColor = barChartColor;
-            barFill.style.borderRadius = '2px';
-            barFill.style.transition = 'width 0.5s ease-out';
-            barContainer.appendChild(barFill);
-            listItem.appendChild(barContainer);
-        }
-        const countTextSpan = document.createElement('span');
-        countTextSpan.textContent = `${count} paper${count === 1 ? '' : 's'}`;
-        countTextSpan.style.minWidth = '55px';
-        countTextSpan.style.textAlign = 'right';
-        listItem.appendChild(countTextSpan);
-        list.appendChild(listItem);
-    }
-    panel.appendChild(list);
+        sectionWrapper.appendChild(list);
+        return sectionWrapper;
+    };
+    summarySectionsContainer.appendChild(createSummarySection('Conference Ranking (CORE)', coreRankCounts, ['A*', 'A', 'B', 'C', 'N/A'], 'CORE'));
+    summarySectionsContainer.appendChild(createSummarySection('Journal Ranking (SJR)', sjrRankCounts, ['Q1', 'Q2', 'Q3', 'Q4', 'N/A'], 'SJR'));
+    panel.appendChild(summarySectionsContainer);
     // --- START: DBLP Link and Timestamp section ---
     if (dblpAuthorPid || cacheTimestamp) {
         const middleBarContainer = document.createElement('div');
@@ -1012,7 +1161,7 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
             const coreDataForChecker = await loadCoreDataForFile(getCoreDataFileForYear(null));
             if (coreDataForChecker.length > 0) {
                 const rank = findRankForVenue(venueName, coreDataForChecker);
-                const badgeElement = createRankBadgeElement(rank);
+                const badgeElement = createRankBadgeElement(rank, 'CORE');
                 if (badgeElement) {
                     rankDisplaySpan.appendChild(badgeElement);
                 }
@@ -1055,7 +1204,7 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
     betaLabel.style.alignItems = 'center';
     betaLabel.style.marginRight = '10px';
     betaLabel.style.cursor = 'help';
-    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\nIt is free and open source.\nIt uses historical CORE rankings (2014-2023) based on publication year.\nHelp us spot inconsistencies!\nFor any issues, please click on “Report Bug”.");
+    betaLabel.setAttribute('title', "Developed by Naveed Anwar Bhatti.\nIt is free and open source.\nIt uses historical CORE rankings (2014-2023) and SCImago journal quartiles for reliability.\nHelp us spot inconsistencies!\nFor any issues, please click on “Report Bug”.");
     finalFooterDiv.appendChild(betaLabel);
     const reportBugLink = document.createElement('a');
     reportBugLink.href = "https://forms.office.com/r/PbSzWaQmpJ";
@@ -1096,7 +1245,7 @@ function displaySummaryPanel(rankCounts, currentUserId, initialCachedPubRanks, c
         rankMapForObserver = new Map();
         activeCachedPublicationRanks.forEach(pubRank => {
             if (pubRank.url && pubRank.rank) {
-                rankMapForObserver.set(pubRank.url, pubRank.rank);
+                rankMapForObserver.set(pubRank.url, { rank: pubRank.rank, system: pubRank.system });
             }
         });
         restoreVisibleInlineBadgesFromCache(activeCachedPublicationRanks);
@@ -1239,7 +1388,7 @@ function restoreVisibleInlineBadgesFromCache(cachedRanks) {
             const normalizedCurrentUrl = normalizeUrlForCache(currentDomUrl);
             const cachedRank = currentRankMap.get(normalizedCurrentUrl);
             if (cachedRank) {
-                displayRankBadgeAfterTitle(rowElement, cachedRank);
+                displayRankBadgeAfterTitle(rowElement, cachedRank.rank, cachedRank.system);
                 badgesAppliedCount++;
             }
         }
@@ -1735,25 +1884,28 @@ async function main() {
             await buildDblpInfoMap(publicationLinkElements, dblpPubsForCurrentUser, scholarUrlToDblpInfoMap, statusElement);
         }
         updateStatusElement(statusElement, 0, publicationLinkElements.length, "Ranking");
-        const rankCounts = { "A*": 0, "A": 0, "B": 0, "C": 0, "N/A": 0 };
+        const coreRankCounts = createEmptyCoreRankCounts();
+        const sjrRankCounts = createEmptySjrRankCounts();
         let processedCount = 0;
         const processPublication = async (pubInfo, titlesAlreadyProcessedSet, dblpKeysUsedSet) => {
+            const defaultResult = { rank: "N/A", system: 'UNKNOWN', rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
             if (titlesAlreadyProcessedSet.has(pubInfo.titleText)) {
-                return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
+                return defaultResult;
             }
             let currentRank = "N/A";
+            let rankingSystem = 'UNKNOWN';
             let dblpKeyUsedForThisRanking = null;
             try {
                 for (const keyword of IGNORE_KEYWORDS) {
                     if (pubInfo.titleText.includes(keyword)) {
-                        return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
+                        return defaultResult;
                     }
                 }
                 const dblpInfo = scholarUrlToDblpInfoMap.get(pubInfo.url);
                 if (dblpInfo && dblpInfo.venue && dblpInfo.dblpKey) {
                     dblpKeyUsedForThisRanking = dblpInfo.dblpKey;
                     if (dblpKeysUsedSet.has(dblpInfo.dblpKey)) {
-                        return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
+                        return defaultResult;
                     }
                     let venueName = dblpInfo.venue;
                     let pageCount = dblpInfo.pageCount;
@@ -1766,26 +1918,45 @@ async function main() {
                         }
                     }
                     if (pageCount !== null && pageCount < 6) {
-                        return { rank: "N/A", rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
+                        return defaultResult;
                     }
-                    const effectiveYear = publicationYear;
-                    const lowerVenueName = venueName ? venueName.toLowerCase() : "";
-                    let venueIgnoredByKeyword = false;
-                    if (venueName) {
-                        for (const keyword of IGNORE_KEYWORDS) {
-                            if (lowerVenueName.includes(keyword)) {
-                                venueIgnoredByKeyword = true;
+                    const dblpKeyLower = dblpInfo.dblpKey.toLowerCase();
+                    const isJournal = dblpKeyLower.startsWith('journals/');
+                    if (isJournal) {
+                        rankingSystem = 'SJR';
+                        const candidateNames = Array.from(new Set([dblpInfo.venue_full, venueName, dblpInfo.acronym].filter((name) => !!name && name.trim().length > 0)));
+                        for (const candidate of candidateNames) {
+                            const sjrResult = await resolveSjrQuartile(candidate);
+                            if (sjrResult && sjrResult.quartile && SJR_QUARTILES.includes(sjrResult.quartile)) {
+                                currentRank = sjrResult.quartile;
                                 break;
                             }
                         }
                     }
-                    if (!venueIgnoredByKeyword) {
-                        const coreDataFile = getCoreDataFileForYear(effectiveYear);
-                        const yearSpecificCoreData = await loadCoreDataForFile(coreDataFile);
-                        if (yearSpecificCoreData.length > 0) {
-                            let venueForRankingApi = dblpInfo.acronym || venueName;
-                            const fullVenueTitleForRanking = dblpInfo.venue_full ?? null;
-                            currentRank = findRankForVenue(venueForRankingApi, yearSpecificCoreData, fullVenueTitleForRanking);
+                    else {
+                        rankingSystem = 'CORE';
+                        const effectiveYear = publicationYear;
+                        const lowerVenueName = venueName ? venueName.toLowerCase() : "";
+                        let venueIgnoredByKeyword = false;
+                        if (venueName) {
+                            for (const keyword of IGNORE_KEYWORDS) {
+                                if (lowerVenueName.includes(keyword)) {
+                                    venueIgnoredByKeyword = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (venueIgnoredByKeyword) {
+                            rankingSystem = 'UNKNOWN';
+                        }
+                        else {
+                            const coreDataFile = getCoreDataFileForYear(effectiveYear);
+                            const yearSpecificCoreData = await loadCoreDataForFile(coreDataFile);
+                            if (yearSpecificCoreData.length > 0) {
+                                let venueForRankingApi = dblpInfo.acronym || venueName;
+                                const fullVenueTitleForRanking = dblpInfo.venue_full ?? null;
+                                currentRank = findRankForVenue(venueForRankingApi, yearSpecificCoreData, fullVenueTitleForRanking);
+                            }
                         }
                     }
                 }
@@ -1793,30 +1964,40 @@ async function main() {
             catch (error) {
                 console.warn(`GSR Error processing publication (URL: ${pubInfo.url}, Title: "${pubInfo.titleText.substring(0, 50)}..."):`, error);
             }
-            if (VALID_RANKS.includes(currentRank)) {
+            const hasCoreRank = rankingSystem === 'CORE' && VALID_RANKS.includes(currentRank);
+            const hasSjrRank = rankingSystem === 'SJR' && SJR_QUARTILES.includes(currentRank);
+            if (hasCoreRank || hasSjrRank) {
                 titlesAlreadyProcessedSet.add(pubInfo.titleText);
                 if (dblpKeyUsedForThisRanking) {
                     dblpKeysUsedSet.add(dblpKeyUsedForThisRanking);
                 }
             }
-            return { rank: currentRank, rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
+            return { rank: currentRank, system: rankingSystem, rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
         };
         for (const pubInfo of publicationLinkElements) {
             const result = await processPublication(pubInfo, scholarTitlesAlreadyRanked, dblpKeysAlreadyUsedForRank);
-            rankCounts[result.rank]++;
-            displayRankBadgeAfterTitle(result.rowElement, result.rank);
+            if (result.system === 'CORE') {
+                const coreKey = VALID_RANKS.includes(result.rank) ? result.rank : 'N/A';
+                coreRankCounts[coreKey] += 1;
+            }
+            else if (result.system === 'SJR') {
+                const sjrKey = SJR_QUARTILES.includes(result.rank) ? result.rank : 'N/A';
+                sjrRankCounts[sjrKey] += 1;
+            }
+            displayRankBadgeAfterTitle(result.rowElement, result.rank, result.system);
             determinedPublicationRanks.push({
                 titleText: result.titleText,
                 rank: result.rank,
+                system: result.system,
                 url: result.url
             });
             processedCount++;
             updateStatusElement(statusElement, processedCount, publicationLinkElements.length, "Ranking");
         }
         if (currentUserId) {
-            await saveCachedData(currentUserId, rankCounts, determinedPublicationRanks, cachedDblpPidForSave);
+            await saveCachedData(currentUserId, coreRankCounts, sjrRankCounts, determinedPublicationRanks, cachedDblpPidForSave);
         }
-        displaySummaryPanel(rankCounts, currentUserId, determinedPublicationRanks, Date.now(), cachedDblpPidForSave);
+        displaySummaryPanel(coreRankCounts, sjrRankCounts, currentUserId, determinedPublicationRanks, Date.now(), cachedDblpPidForSave);
     }
     catch (error) {
         if (error instanceof DblpRateLimitError) {
@@ -1848,7 +2029,7 @@ async function initialLoad() {
         const cached = await loadCachedData(userId);
         if (cached && cached.publicationRanks) {
             const pubRanksArr = unpackRanks(cached.publicationRanks);
-            displaySummaryPanel(cached.rankCounts, userId, pubRanksArr, cached.timestamp, cached.dblpAuthorPid);
+            displaySummaryPanel(cached.coreRankCounts, cached.sjrRankCounts, userId, pubRanksArr, cached.timestamp, cached.dblpAuthorPid);
             return;
         }
     }
