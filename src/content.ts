@@ -118,6 +118,24 @@ const IGNORE_KEYWORDS: string[] = [ // Explicitly typed and filled
   "tech report", "industry track", "tutorial notes", "working notes"
 ];
 
+const ARXIV_PLAIN_KEYWORDS: string[] = [
+  " arxiv ",
+  " corr ",
+  " computing research repository ",
+  " arxiv preprint ",
+  " arxiv e print ",
+  " arxiv e prints "
+];
+
+const ARXIV_NORMALIZED_VALUES = new Set([
+  "arxiv",
+  "arxiv preprint",
+  "arxiv e print",
+  "arxiv e prints",
+  "computing research repository",
+  "corr"
+]);
+
 const STATUS_ELEMENT_ID = 'scholar-ranker-status-progress';
 const SUMMARY_PANEL_ID = 'scholar-ranker-summary';
 const CACHE_VERSION = 2;
@@ -445,6 +463,31 @@ async function fetchVenueAndYear(publicationUrl: string): Promise<VenueAndYear> 
 function normalizeJournalName(name: string | null | undefined): string {
     if (!name) return "";
     return cleanTextForComparison(name, false);
+}
+
+function isArxivLikeVenue(info: { venue: string | null; venue_full?: string | null; acronym?: string | null; dblpKey: string }): boolean {
+    const key = info.dblpKey?.toLowerCase() ?? "";
+    if (key.startsWith('journals/corr') || key.includes('/corr/')) {
+        return true;
+    }
+
+    const candidates = [info.venue, info.venue_full, info.acronym];
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        const normalized = normalizeJournalName(candidate);
+        if (!normalized) continue;
+        if (ARXIV_NORMALIZED_VALUES.has(normalized)) {
+            return true;
+        }
+        const padded = ` ${normalized} `;
+        for (const keyword of ARXIV_PLAIN_KEYWORDS) {
+            if (padded.includes(keyword)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 const SJR_SEARCH_BASE_URL = 'https://www.scimagojr.com/journalsearch.php';
@@ -2034,6 +2077,10 @@ async function main() {
             const isJournal = dblpKeyLower.startsWith('journals/');
 
             if (isJournal) {
+                if (isArxivLikeVenue(dblpInfo)) {
+                    return defaultResult;
+                }
+
                 rankingSystem = 'SJR';
                 const candidateNames = Array.from(new Set([dblpInfo.venue_full, venueName, dblpInfo.acronym].filter((name): name is string => !!name && name.trim().length > 0)));
                 for (const candidate of candidateNames) {
