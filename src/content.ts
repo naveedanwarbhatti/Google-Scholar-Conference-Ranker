@@ -662,109 +662,142 @@ function findRankForVenue(
     fullVenueTitle: string | null | undefined = undefined
 ): string {
 
-    if (!venueKey || !venueKey.trim()) return "N/A";
-    const keyLower = venueKey.toLowerCase().trim();
+    const trimmedVenueKey = venueKey?.trim();
+    const keyLower = trimmedVenueKey ? trimmedVenueKey.toLowerCase() : "";
 
     /* ---------- 1. exact-acronym match ---------- */
-    const acronymMatches = coreData.filter(
-        e => e.acronym && e.acronym.toLowerCase() === keyLower
-    );
-
-    /* 1-a  single hit → done */
-    if (acronymMatches.length === 1) {
-        const rank = acronymMatches[0].rank;
-        return VALID_RANKS.includes(rank) ? rank : "N/A";
-    }
-
-    /* 1-b  ambiguous acronym → log & try title disambiguation */
-    if (acronymMatches.length > 1) {
-        console.log(
-            `[Rank] Acronym '${venueKey}' matched ${acronymMatches.length} CORE rows.`,
-            acronymMatches.map(e => ({ title: e.title, rank: e.rank }))
+    if (trimmedVenueKey) {
+        const acronymMatches = coreData.filter(
+            e => e.acronym && e.acronym.toLowerCase() === keyLower
         );
 
-        if (fullVenueTitle) {
-            const cleanedFull = cleanTextForComparison(fullVenueTitle, false);
-            let   bestScore   = 0;
-            let   bestEntry: CoreEntry | null = null;
+        /* 1-a  single hit → done */
+        if (acronymMatches.length === 1) {
+            const rank = acronymMatches[0].rank;
+            return VALID_RANKS.includes(rank) ? rank : "N/A";
+        }
 
-            for (const entry of acronymMatches) {
-                if (!entry.title) continue;
-                const score = jaroWinkler(
-                    cleanedFull,
-                    cleanTextForComparison(entry.title, false)
-                );
-                console.log(
-                    `  ↳ JW score vs "${entry.title}": ${score.toFixed(3)}`
-                );
+        /* 1-b  ambiguous acronym → log & try title disambiguation */
+        if (acronymMatches.length > 1) {
+            console.log(
+                `[Rank] Acronym '${venueKey}' matched ${acronymMatches.length} CORE rows.`,
+                acronymMatches.map(e => ({ title: e.title, rank: e.rank }))
+            );
 
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestEntry = entry;
+            if (fullVenueTitle) {
+                const cleanedFull = cleanTextForComparison(fullVenueTitle, false);
+                let   bestScore   = 0;
+                let   bestEntry: CoreEntry | null = null;
+
+                for (const entry of acronymMatches) {
+                    if (!entry.title) continue;
+                    const score = jaroWinkler(
+                        cleanedFull,
+                        cleanTextForComparison(entry.title, false)
+                    );
+                    console.log(
+                        `  ↳ JW score vs "${entry.title}": ${score.toFixed(3)}`
+                    );
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestEntry = entry;
+                    }
+                    if (score === 1) break;     // perfect match
                 }
-                if (score === 1) break;     // perfect match
-            }
 
-            if (
-                bestEntry &&
-                bestScore >= 0.85 &&
-                VALID_RANKS.includes(bestEntry.rank)
-            ) {
+                if (
+                    bestEntry &&
+                    bestScore >= 0.85 &&
+                    VALID_RANKS.includes(bestEntry.rank)
+                ) {
+                    console.log(
+                        `[Rank]   ► Disambiguated by title → "${bestEntry.title}" (${bestEntry.rank})`
+                    );
+                    return bestEntry.rank;
+                }
+
                 console.log(
-                    `[Rank]   ► Disambiguated by title → "${bestEntry.title}" (${bestEntry.rank})`
+                    `[Rank]   ► Title disambiguation failed (best score ${bestScore.toFixed(
+                        3
+                    )}). Returning N/A.`
                 );
-                return bestEntry.rank;
+            } else {
+                console.log(
+                    `[Rank]   ► No fullVenueTitle provided – cannot disambiguate. Returning N/A.`
+                );
             }
-
-            console.log(
-                `[Rank]   ► Title disambiguation failed (best score ${bestScore.toFixed(
-                    3
-                )}). Returning N/A.`
-            );
-        } else {
-            console.log(
-                `[Rank]   ► No fullVenueTitle provided – cannot disambiguate. Returning N/A.`
-            );
-        }
-        return "N/A";              // ← new behaviour
-    }
-
-    /* ---------- 2. substring containment (unchanged) ---------- */
-    const gsCleaned = cleanTextForComparison(keyLower, true);
-    if (!gsCleaned) return "N/A";
-
-    let bestSubRank: string | null = null;
-    let longestLen  = 0;
-
-    for (const entry of coreData) {
-        if (!entry.title) continue;
-        let coreTitle = cleanTextForComparison(entry.title, false);
-        coreTitle     = stripOrgPrefixes(coreTitle);
-        if (gsCleaned.includes(coreTitle) && coreTitle.length > longestLen) {
-            longestLen  = coreTitle.length;
-            bestSubRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+            return "N/A";              // ← new behaviour
         }
     }
-    if (bestSubRank) return bestSubRank;
 
-    /* ---------- 3. fuzzy JW (unchanged) ---------- */
-    let bestFuzzy = 0;
-    let fuzzyRank: string | null = null;
-
-    for (const entry of coreData) {
-        if (!entry.title) continue;
-        let coreTitle = cleanTextForComparison(entry.title, false);
-        coreTitle     = stripOrgPrefixes(coreTitle);
-        if (coreTitle.length < 6 || gsCleaned.length < 6) continue;
-
-        const score = jaroWinkler(gsCleaned, coreTitle);
-        if (score >= FUZZY_THRESHOLD && score > bestFuzzy) {
-            bestFuzzy = score;
-            fuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
-            if (score === 1) break;
-        }
+    const candidates: Array<{ raw: string; isScholar: boolean }> = [];
+    if (trimmedVenueKey) {
+        candidates.push({ raw: keyLower, isScholar: true });
     }
-    return fuzzyRank ?? "N/A";
+    if (fullVenueTitle && fullVenueTitle.trim().length > 0) {
+        candidates.push({ raw: fullVenueTitle.toLowerCase(), isScholar: false });
+    }
+
+    if (candidates.length === 0) {
+        return "N/A";
+    }
+
+    const trySubstringMatch = (gsCleaned: string): string | null => {
+        let bestSubRank: string | null = null;
+        let longestLen  = 0;
+
+        for (const entry of coreData) {
+            if (!entry.title) continue;
+            let coreTitle = cleanTextForComparison(entry.title, false);
+            coreTitle     = stripOrgPrefixes(coreTitle);
+            if (!coreTitle) continue;
+
+            if (gsCleaned.includes(coreTitle) && coreTitle.length > longestLen) {
+                longestLen  = coreTitle.length;
+                bestSubRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+            }
+        }
+
+        return bestSubRank;
+    };
+
+    const tryFuzzyMatch = (gsCleaned: string): string | null => {
+        let bestFuzzy = 0;
+        let fuzzyRank: string | null = null;
+
+        for (const entry of coreData) {
+            if (!entry.title) continue;
+            let coreTitle = cleanTextForComparison(entry.title, false);
+            coreTitle     = stripOrgPrefixes(coreTitle);
+            if (!coreTitle) continue;
+            if (coreTitle.length < 6 || gsCleaned.length < 6) continue;
+
+            const score = jaroWinkler(gsCleaned, coreTitle);
+            if (score >= FUZZY_THRESHOLD && score > bestFuzzy) {
+                bestFuzzy = score;
+                fuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+                if (score === 1) break;
+            }
+        }
+
+        return fuzzyRank;
+    };
+
+    const seenCleaned = new Set<string>();
+    for (const candidate of candidates) {
+        const cleaned = cleanTextForComparison(candidate.raw, candidate.isScholar);
+        if (!cleaned || seenCleaned.has(cleaned)) continue;
+        seenCleaned.add(cleaned);
+
+        const subRank = trySubstringMatch(cleaned);
+        if (subRank) return subRank;
+
+        const fuzzyRank = tryFuzzyMatch(cleaned);
+        if (fuzzyRank) return fuzzyRank;
+    }
+
+    return "N/A";
 }
 
 
