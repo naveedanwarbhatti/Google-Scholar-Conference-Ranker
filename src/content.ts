@@ -114,8 +114,7 @@ const VALID_RANKS: string[] = ["A*", "A", "B", "C"]; // Added string[] type
 const SJR_QUARTILES: string[] = ["Q1", "Q2", "Q3", "Q4"];
 const IGNORE_KEYWORDS: string[] = [ // Explicitly typed and filled
   "workshop", "transactions", "poster", "demo", "abstract",
-  "extended abstract", "doctoral consortium", "doctoral symposium",
-  "computer communication review", "companion", "adjunct", "technical report",
+  "extended abstract", "doctoral consortium", "doctoral symposium", "adjunct", "technical report",
   "tech report", "industry track", "tutorial notes", "working notes"
 ];
 
