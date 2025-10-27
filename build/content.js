@@ -440,7 +440,7 @@ function extractSjrTitle(text) {
     }
     return null;
 }
-function parseSjrQuartileFromText(text) {
+function parseSjrQuartilesFromText(text) {
     const quartileByYear = new Map();
     const regex = /\|\s*(\d{4})\s*\|\s*(Q[1-4])\s*\|/g;
     let match;
@@ -454,20 +454,43 @@ function parseSjrQuartileFromText(text) {
             quartileByYear.set(year, quartileNumber);
         }
     }
-    if (quartileByYear.size === 0) {
+    const result = {};
+    for (const [year, quartileNumber] of quartileByYear.entries()) {
+        result[year] = `Q${quartileNumber}`;
+    }
+    return result;
+}
+function selectQuartileForYear(data, publicationYear) {
+    const entries = Object.entries(data.quartilesByYear)
+        .map(([year, quartile]) => ({ year: Number(year), quartile }))
+        .filter(entry => Number.isFinite(entry.year))
+        .sort((a, b) => b.year - a.year);
+    if (entries.length === 0) {
         return { quartile: null, year: null };
     }
-    const sortedYears = Array.from(quartileByYear.keys()).sort((a, b) => b - a);
-    const latestYear = sortedYears[0];
-    const bestQuartileNumber = quartileByYear.get(latestYear);
-    return { quartile: `Q${bestQuartileNumber}`, year: latestYear };
+    if (publicationYear) {
+        const matchingYear = entries.find(entry => entry.year === publicationYear);
+        if (matchingYear) {
+            return { quartile: matchingYear.quartile, year: matchingYear.year };
+        }
+        const previousYear = entries.find(entry => entry.year < publicationYear);
+        if (previousYear) {
+            return { quartile: previousYear.quartile, year: previousYear.year };
+        }
+    }
+    const latestEntry = entries[0];
+    return { quartile: latestEntry.quartile, year: latestEntry.year };
 }
-async function resolveSjrQuartile(journalName) {
+async function resolveSjrQuartile(journalName, publicationYear) {
     const normalizedQuery = normalizeJournalName(journalName);
     if (!normalizedQuery)
         return null;
     if (sjrLookupCache.has(normalizedQuery)) {
-        return sjrLookupCache.get(normalizedQuery) ?? null;
+        const cachedData = sjrLookupCache.get(normalizedQuery) ?? null;
+        if (!cachedData)
+            return null;
+        const { quartile, year } = selectQuartileForYear(cachedData, publicationYear ?? null);
+        return { quartile, year, resolvedTitle: cachedData.resolvedTitle };
     }
     const searchUrl = `${SJR_SEARCH_BASE_URL}?q=${encodeURIComponent(journalName)}&tip=jou`;
     const searchText = await fetchScimagoText(searchUrl);
@@ -480,31 +503,48 @@ async function resolveSjrQuartile(journalName) {
         sjrLookupCache.set(normalizedQuery, null);
         return null;
     }
-    let bestMatch = null;
-    for (const candidateId of candidateIds) {
-        const detailUrl = `${SJR_SEARCH_BASE_URL}?q=${candidateId}&tip=sid&clean=0`;
-        const detailText = await fetchScimagoText(detailUrl);
-        if (!detailText)
-            continue;
-        const resolvedTitle = extractSjrTitle(detailText);
-        if (!resolvedTitle)
-            continue;
-        const normalizedResolved = normalizeJournalName(resolvedTitle);
-        if (!normalizedResolved)
-            continue;
-        const similarity = jaroWinkler(normalizedQuery, normalizedResolved);
-        const { quartile, year } = parseSjrQuartileFromText(detailText);
-        const candidateResult = { quartile, year, resolvedTitle };
-        if (!bestMatch || similarity > bestMatch.score) {
-            bestMatch = { score: similarity, result: candidateResult };
+    const candidateMatches = [];
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < candidateIds.length; i += BATCH_SIZE) {
+        const batch = candidateIds.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(batch.map(async (candidateId) => {
+            const detailUrl = `${SJR_SEARCH_BASE_URL}?q=${candidateId}&tip=sid&clean=0`;
+            const detailText = await fetchScimagoText(detailUrl);
+            if (!detailText)
+                return null;
+            const resolvedTitle = extractSjrTitle(detailText);
+            if (!resolvedTitle)
+                return null;
+            const normalizedResolved = normalizeJournalName(resolvedTitle);
+            if (!normalizedResolved)
+                return null;
+            const quartilesByYear = parseSjrQuartilesFromText(detailText);
+            if (Object.keys(quartilesByYear).length === 0)
+                return null;
+            const similarity = jaroWinkler(normalizedQuery, normalizedResolved);
+            return {
+                score: similarity,
+                data: { resolvedTitle, quartilesByYear }
+            };
+        }));
+        for (const result of batchResults) {
+            if (result) {
+                candidateMatches.push(result);
+            }
         }
-        if (similarity >= 0.98) {
+        if (candidateMatches.some(match => match.score >= 0.98)) {
             break;
         }
     }
-    const finalResult = bestMatch?.result ?? null;
-    sjrLookupCache.set(normalizedQuery, finalResult);
-    return finalResult;
+    if (candidateMatches.length === 0) {
+        sjrLookupCache.set(normalizedQuery, null);
+        return null;
+    }
+    candidateMatches.sort((a, b) => b.score - a.score);
+    const bestData = candidateMatches[0].data;
+    sjrLookupCache.set(normalizedQuery, bestData);
+    const { quartile, year } = selectQuartileForYear(bestData, publicationYear ?? null);
+    return { quartile, year, resolvedTitle: bestData.resolvedTitle };
 }
 const COMMON_ABBREVIATIONS = { "int'l": "international", "intl": "international", "conf\\.": "conference", "conf": "conference", "proc\\.": "proceedings", "proc": "proceedings", "symp\\.": "symposium", "symp": "symposium", "j\\.": "journal", "jour": "journal", "trans\\.": "transactions", "trans": "transactions", "annu\\.": "annual", "comput\\.": "computing", "commun\\.": "communications", "syst\\.": "systems", "sci\\.": "science", "tech\\.": "technical", "technol": "technology", "engin\\.": "engineering", "res\\.": "research", "adv\\.": "advances", "appl\\.": "applications", "lectures notes": "lecture notes", "lect notes": "lecture notes", "lncs": "lecture notes in computer science", };
 function cleanTextForComparison(text, isGoogleScholarVenue = false) {
@@ -739,8 +779,9 @@ function createRankBadgeElement(rank, system) {
     if (system === 'SJR' && SJR_QUARTILES.includes(rank)) {
         badge.style.border = '2px solid #ccc';
         badge.style.borderRadius = '50%';
-        badge.style.minWidth = '30px';
-        badge.style.height = '30px';
+        badge.style.minWidth = '24px';
+        badge.style.height = '24px';
+        badge.style.fontSize = '0.8em';
         switch (rank) {
             case 'Q1':
                 badge.style.backgroundColor = '#FFD700';
@@ -791,8 +832,11 @@ function createRankBadgeElement(rank, system) {
         badge.style.border = system === 'SJR' ? '2px solid #ccc' : '1px solid #ccc';
         badge.style.borderRadius = system === 'SJR' ? '50%' : '3px';
         badge.style.padding = system === 'SJR' ? '0' : '2px 6px';
-        badge.style.minWidth = '30px';
-        badge.style.height = system === 'SJR' ? '30px' : '';
+        badge.style.minWidth = system === 'SJR' ? '24px' : '30px';
+        badge.style.height = system === 'SJR' ? '24px' : '';
+        if (system === 'SJR') {
+            badge.style.fontSize = '0.8em';
+        }
         badge.style.textAlign = system === 'SJR' ? 'center' : 'center';
         applyNeutralStyle();
         return badge;
@@ -1107,82 +1151,6 @@ function displaySummaryPanel(coreRankCounts, sjrRankCounts, currentUserId, initi
         panel.appendChild(middleBarContainer);
     }
     // --- END: DBLP Link and Timestamp section ---
-    const checkerSection = document.createElement('div');
-    // Adjust marginTop for checkerSection based on whether the DBLP/Timestamp section was added
-    if (dblpAuthorPid || cacheTimestamp) {
-        checkerSection.style.marginTop = '0px'; // The middleBarContainer provides spacing
-    }
-    else {
-        checkerSection.style.marginTop = '15px'; // Original spacing from list
-    }
-    checkerSection.style.paddingTop = '10px'; // Keep padding for content separation
-    checkerSection.style.borderTop = '1px solid #e0e0e0'; // Always have border before checker
-    const checkerTitle = document.createElement('div');
-    checkerTitle.textContent = 'Conference Rank Checker (CORE 2023)';
-    checkerTitle.style.fontSize = '13px';
-    checkerTitle.style.fontWeight = 'bold';
-    checkerTitle.style.color = '#555';
-    checkerTitle.style.marginBottom = '8px';
-    checkerSection.appendChild(checkerTitle);
-    const checkerInputContainer = document.createElement('div');
-    checkerInputContainer.style.display = 'flex';
-    checkerInputContainer.style.alignItems = 'center';
-    const conferenceInput = document.createElement('input');
-    conferenceInput.type = 'text';
-    conferenceInput.placeholder = 'Enter conference name/acronym';
-    conferenceInput.style.flexGrow = '1';
-    conferenceInput.style.padding = '8px 15px';
-    conferenceInput.style.fontSize = '13px';
-    conferenceInput.style.border = '1px solid #d0d0d0';
-    conferenceInput.style.borderRadius = '20px';
-    conferenceInput.style.backgroundColor = '#f8f9fa';
-    conferenceInput.style.outline = 'none';
-    conferenceInput.onfocus = () => { conferenceInput.style.borderColor = '#76C7C0'; };
-    conferenceInput.onblur = () => { conferenceInput.style.borderColor = '#d0d0d0'; };
-    checkerInputContainer.appendChild(conferenceInput);
-    const rankDisplaySpan = document.createElement('span');
-    rankDisplaySpan.style.minWidth = '40px';
-    rankDisplaySpan.style.textAlign = 'center';
-    checkerInputContainer.appendChild(rankDisplaySpan);
-    checkerSection.appendChild(checkerInputContainer);
-    let debounceTimeout;
-    const debounce = (func, delay) => {
-        return (...args) => {
-            clearTimeout(debounceTimeout);
-            debounceTimeout = window.setTimeout(() => func.apply(null, args), delay);
-        };
-    };
-    const performRankCheck = async () => {
-        const venueName = conferenceInput.value.trim();
-        rankDisplaySpan.innerHTML = '';
-        if (!venueName)
-            return;
-        try {
-            const coreDataForChecker = await loadCoreDataForFile(getCoreDataFileForYear(null));
-            if (coreDataForChecker.length > 0) {
-                const rank = findRankForVenue(venueName, coreDataForChecker);
-                const badgeElement = createRankBadgeElement(rank, 'CORE');
-                if (badgeElement) {
-                    rankDisplaySpan.appendChild(badgeElement);
-                }
-                else {
-                    rankDisplaySpan.textContent = '-';
-                    rankDisplaySpan.style.color = '#999';
-                }
-            }
-            else {
-                rankDisplaySpan.textContent = 'Data N/A';
-                rankDisplaySpan.style.color = '#cc0000';
-            }
-        }
-        catch (error) {
-            console.error("Error in conference rank checker:", error);
-            rankDisplaySpan.textContent = 'Error';
-            rankDisplaySpan.style.color = '#cc0000';
-        }
-    };
-    conferenceInput.addEventListener('input', debounce(performRankCheck, 500));
-    panel.appendChild(checkerSection);
     const finalFooterDiv = document.createElement('div');
     finalFooterDiv.style.display = 'flex';
     finalFooterDiv.style.justifyContent = 'flex-end';
@@ -1926,7 +1894,7 @@ async function main() {
                         rankingSystem = 'SJR';
                         const candidateNames = Array.from(new Set([dblpInfo.venue_full, venueName, dblpInfo.acronym].filter((name) => !!name && name.trim().length > 0)));
                         for (const candidate of candidateNames) {
-                            const sjrResult = await resolveSjrQuartile(candidate);
+                            const sjrResult = await resolveSjrQuartile(candidate, publicationYear ?? null);
                             if (sjrResult && sjrResult.quartile && SJR_QUARTILES.includes(sjrResult.quartile)) {
                                 currentRank = sjrResult.quartile;
                                 break;
