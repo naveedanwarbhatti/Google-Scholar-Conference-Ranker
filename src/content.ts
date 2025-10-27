@@ -140,7 +140,7 @@ const STATUS_ELEMENT_ID = 'scholar-ranker-status-progress';
 const SUMMARY_PANEL_ID = 'scholar-ranker-summary';
 const CACHE_VERSION = 2;
 const CACHE_PREFIX = `scholarRanker_profile_v${CACHE_VERSION}_`;
-const CACHE_DURATION_MS = Number.POSITIVE_INFINITY;   // never expires
+const CACHE_DURATION_MS = 1000 * 60 * 60 * 24 * 7;   // 7 days
 const DBLP_CACHE_DURATION_MS = Number.POSITIVE_INFINITY;   // never expires
 
 console.log("Google Scholar Ranker: Content script loaded (vDBLP_Auto_Integration_Fix1).");
@@ -269,7 +269,14 @@ async function loadCachedData(userId: string): Promise<CachedProfileData | null>
         if (result && result[cacheKey]) {
             const data = result[cacheKey] as CachedProfileData;
             if (data.version === CACHE_VERSION) {
-                return data;
+                const isExpired = Number.isFinite(CACHE_DURATION_MS)
+                    ? (Date.now() - (data.timestamp ?? 0)) > CACHE_DURATION_MS
+                    : false;
+                if (!isExpired) {
+                    return data;
+                }
+                await chrome.storage.local.remove(cacheKey);
+                console.log("GSR INFO: Cached data expired for", cacheKey);
             }
         }
     } catch (error) {
@@ -306,19 +313,19 @@ async function saveCachedData(
 }
 
 async function clearCachedData(userId: string): Promise<void> {
-    const cacheKey = getCacheKey(userId);
     try {
-        await chrome.storage.local.remove(cacheKey);
+        await chrome.storage.local.clear();
         activeCachedPublicationRanks = null;
         rankMapForObserver = null;
         disconnectPublicationTableObserver();
         dblpPubsForCurrentUser = [];
         scholarUrlToDblpVenueMap.clear();
+        console.log("GSR INFO: Cleared all cached data from chrome.storage.local for", userId);
         if (chrome.runtime.lastError) {
             //console.error("DEBUG: clearCachedData - chrome.runtime.lastError:", chrome.runtime.lastError.message);
         }
     } catch (error) {
-        //console.error("DEBUG: clearCachedData - Error:", error, "Key:", cacheKey);
+        //console.error("DEBUG: clearCachedData - Error:", error);
     }
 }
 
@@ -505,20 +512,58 @@ interface SjrQuartileResult {
     resolvedTitle: string | null;
 }
 
-const sjrLookupCache = new Map<string, SjrQuartileData | null>();
+type SjrLookupCacheEntry =
+    | { kind: 'success'; data: SjrQuartileData }
+    | { kind: 'not_found' };
 
-async function fetchScimagoText(url: string): Promise<string | null> {
-    try {
-        const proxiedUrl = `${SJR_PROXY_PREFIX}${url}`;
-        const response = await fetch(proxiedUrl);
-        if (!response.ok) {
-            return null;
+type SjrQuartileLookupResult =
+    | (SjrQuartileResult & { status: 'success' })
+    | { status: 'not_found' }
+    | { status: 'error'; transient: boolean };
+
+type FetchScimagoOutcome =
+    | { ok: true; text: string }
+    | { ok: false; transient: boolean };
+
+const sjrLookupCache = new Map<string, SjrLookupCacheEntry>();
+
+function delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchScimagoText(url: string, maxAttempts = 3): Promise<FetchScimagoOutcome> {
+    const proxiedUrl = `${SJR_PROXY_PREFIX}${url}`;
+    let lastTransientFailure = false;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+            const response = await fetch(proxiedUrl);
+            if (response.ok) {
+                return { ok: true, text: await response.text() };
+            }
+
+            const status = response.status;
+            const transient = status === 429 || status >= 500;
+            lastTransientFailure = lastTransientFailure || transient;
+
+            if (attempt < maxAttempts - 1 && transient) {
+                await delay(500 * Math.pow(2, attempt));
+                continue;
+            }
+
+            return { ok: false, transient };
+        } catch (error) {
+            console.warn('SJR fetch error for', url, error);
+            lastTransientFailure = true;
+            if (attempt < maxAttempts - 1) {
+                await delay(500 * Math.pow(2, attempt));
+                continue;
+            }
+            return { ok: false, transient: true };
         }
-        return await response.text();
-    } catch (error) {
-        console.warn('SJR fetch error for', url, error);
-        return null;
     }
+
+    return { ok: false, transient: lastTransientFailure };
 }
 
 function extractCandidateIdsFromSearch(text: string): string[] {
@@ -588,28 +633,36 @@ function selectQuartileForYear(
     return { quartile: latestEntry.quartile, year: latestEntry.year };
 }
 
-async function resolveSjrQuartile(journalName: string, publicationYear?: number | null): Promise<SjrQuartileResult | null> {
+async function resolveSjrQuartile(journalName: string, publicationYear?: number | null): Promise<SjrQuartileLookupResult> {
     const normalizedQuery = normalizeJournalName(journalName);
-    if (!normalizedQuery) return null;
+    if (!normalizedQuery) return { status: 'not_found' };
 
     if (sjrLookupCache.has(normalizedQuery)) {
-        const cachedData = sjrLookupCache.get(normalizedQuery) ?? null;
-        if (!cachedData) return null;
-        const { quartile, year } = selectQuartileForYear(cachedData, publicationYear ?? null);
-        return { quartile, year, resolvedTitle: cachedData.resolvedTitle };
+        const cachedEntry = sjrLookupCache.get(normalizedQuery);
+        if (cachedEntry?.kind === 'not_found') {
+            return { status: 'not_found' };
+        }
+        if (cachedEntry?.kind === 'success') {
+            const { quartile, year } = selectQuartileForYear(cachedEntry.data, publicationYear ?? null);
+            return { status: 'success', quartile, year, resolvedTitle: cachedEntry.data.resolvedTitle };
+        }
     }
 
     const searchUrl = `${SJR_SEARCH_BASE_URL}?q=${encodeURIComponent(journalName)}&tip=jou`;
-    const searchText = await fetchScimagoText(searchUrl);
-    if (!searchText) {
-        sjrLookupCache.set(normalizedQuery, null);
-        return null;
+    const searchOutcome = await fetchScimagoText(searchUrl);
+    if (!searchOutcome.ok) {
+        if (!searchOutcome.transient) {
+            sjrLookupCache.set(normalizedQuery, { kind: 'not_found' });
+            return { status: 'not_found' };
+        }
+        return { status: 'error', transient: true };
     }
+    const searchText = searchOutcome.text;
 
     const candidateIds = extractCandidateIdsFromSearch(searchText);
     if (candidateIds.length === 0) {
-        sjrLookupCache.set(normalizedQuery, null);
-        return null;
+        sjrLookupCache.set(normalizedQuery, { kind: 'not_found' });
+        return { status: 'not_found' };
     }
 
     interface CandidateMatch {
@@ -619,13 +672,20 @@ async function resolveSjrQuartile(journalName: string, publicationYear?: number 
 
     const candidateMatches: CandidateMatch[] = [];
     const BATCH_SIZE = 4;
+    let encounteredTransientFailure = false;
 
     for (let i = 0; i < candidateIds.length; i += BATCH_SIZE) {
         const batch = candidateIds.slice(i, i + BATCH_SIZE);
         const batchResults = await Promise.all(batch.map(async candidateId => {
             const detailUrl = `${SJR_SEARCH_BASE_URL}?q=${candidateId}&tip=sid&clean=0`;
-            const detailText = await fetchScimagoText(detailUrl);
-            if (!detailText) return null;
+            const detailOutcome = await fetchScimagoText(detailUrl);
+            if (!detailOutcome.ok) {
+                if (detailOutcome.transient) {
+                    encounteredTransientFailure = true;
+                }
+                return null;
+            }
+            const detailText = detailOutcome.text;
             const resolvedTitle = extractSjrTitle(detailText);
             if (!resolvedTitle) return null;
             const normalizedResolved = normalizeJournalName(resolvedTitle);
@@ -651,16 +711,19 @@ async function resolveSjrQuartile(journalName: string, publicationYear?: number 
     }
 
     if (candidateMatches.length === 0) {
-        sjrLookupCache.set(normalizedQuery, null);
-        return null;
+        if (encounteredTransientFailure) {
+            return { status: 'error', transient: true };
+        }
+        sjrLookupCache.set(normalizedQuery, { kind: 'not_found' });
+        return { status: 'not_found' };
     }
 
     candidateMatches.sort((a, b) => b.score - a.score);
     const bestData = candidateMatches[0].data;
-    sjrLookupCache.set(normalizedQuery, bestData);
+    sjrLookupCache.set(normalizedQuery, { kind: 'success', data: bestData });
 
     const { quartile, year } = selectQuartileForYear(bestData, publicationYear ?? null);
-    return { quartile, year, resolvedTitle: bestData.resolvedTitle };
+    return { status: 'success', quartile, year, resolvedTitle: bestData.resolvedTitle };
 }
 
 const COMMON_ABBREVIATIONS: Record<string, string> = { "int'l": "international", "intl": "international", "conf\\.": "conference", "conf": "conference", "proc\\.": "proceedings", "proc": "proceedings", "symp\\.": "symposium", "symp": "symposium", "j\\.": "journal", "jour": "journal", "trans\\.": "transactions", "trans": "transactions", "annu\\.": "annual", "comput\\.": "computing", "commun\\.": "communications", "syst\\.": "systems", "sci\\.": "science", "tech\\.": "technical", "technol": "technology", "engin\\.": "engineering", "res\\.": "research", "adv\\.": "advances", "appl\\.": "applications", "lectures notes": "lecture notes", "lect notes": "lecture notes", "lncs": "lecture notes in computer science", };
@@ -1930,6 +1993,7 @@ async function main() {
 
   const currentUserId = getScholarUserId();
   const determinedPublicationRanks: PublicationRankInfo[] = [];
+  const persistentPublicationRanks: PublicationRankInfo[] = [];
   let cachedDblpPidForSave: string | null = null;
 
   const scholarTitlesAlreadyRanked = new Set<string>();
@@ -2031,9 +2095,9 @@ async function main() {
         pubInfo: { url: string, rowElement: HTMLElement, titleText: string, yearFromProfile: number | null },
         titlesAlreadyProcessedSet: Set<string>,
         dblpKeysUsedSet: Set<string>
-    ): Promise<{ rank: string, system: RankSystem, rowElement: HTMLElement, titleText: string, url: string }> => {
+    ): Promise<{ rank: string, system: RankSystem, rowElement: HTMLElement, titleText: string, url: string, shouldPersist: boolean }> => {
 
-      const defaultResult = { rank: "N/A", system: 'UNKNOWN' as RankSystem, rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
+      const defaultResult = { rank: "N/A", system: 'UNKNOWN' as RankSystem, rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url, shouldPersist: true };
 
       if (titlesAlreadyProcessedSet.has(pubInfo.titleText)) {
           return defaultResult;
@@ -2042,6 +2106,7 @@ async function main() {
       let currentRank = "N/A";
       let rankingSystem: RankSystem = 'UNKNOWN';
       let dblpKeyUsedForThisRanking: string | null = null;
+      let shouldPersist = true;
 
       try {
         for (const keyword of IGNORE_KEYWORDS) {
@@ -2083,12 +2148,20 @@ async function main() {
 
                 rankingSystem = 'SJR';
                 const candidateNames = Array.from(new Set([dblpInfo.venue_full, venueName, dblpInfo.acronym].filter((name): name is string => !!name && name.trim().length > 0)));
+                let sjrLookupTransientFailure = false;
                 for (const candidate of candidateNames) {
                     const sjrResult = await resolveSjrQuartile(candidate, publicationYear ?? null);
-                    if (sjrResult && sjrResult.quartile && SJR_QUARTILES.includes(sjrResult.quartile)) {
+                    if (sjrResult.status === 'success' && sjrResult.quartile && SJR_QUARTILES.includes(sjrResult.quartile)) {
                         currentRank = sjrResult.quartile;
+                        sjrLookupTransientFailure = false;
                         break;
                     }
+                    if (sjrResult.status === 'error' && sjrResult.transient) {
+                        sjrLookupTransientFailure = true;
+                    }
+                }
+                if (currentRank === 'N/A' && sjrLookupTransientFailure) {
+                    shouldPersist = false;
                 }
             } else {
                 rankingSystem = 'CORE';
@@ -2131,7 +2204,7 @@ async function main() {
               dblpKeysUsedSet.add(dblpKeyUsedForThisRanking);
           }
       }
-      return { rank: currentRank, system: rankingSystem, rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url };
+      return { rank: currentRank, system: rankingSystem, rowElement: pubInfo.rowElement, titleText: pubInfo.titleText, url: pubInfo.url, shouldPersist };
     };
 
 
@@ -2147,18 +2220,22 @@ async function main() {
         }
 
         displayRankBadgeAfterTitle(result.rowElement, result.rank, result.system);
-        determinedPublicationRanks.push({
+        const publicationRankInfo: PublicationRankInfo = {
             titleText: result.titleText,
             rank: result.rank,
             system: result.system,
             url: result.url
-        });
+        };
+        determinedPublicationRanks.push(publicationRankInfo);
+        if (result.shouldPersist !== false) {
+            persistentPublicationRanks.push(publicationRankInfo);
+        }
         processedCount++;
         updateStatusElement(statusElement, processedCount, publicationLinkElements.length, "Ranking");
     }
 
-    if (currentUserId) {
-        await saveCachedData(currentUserId, coreRankCounts, sjrRankCounts, determinedPublicationRanks, cachedDblpPidForSave);
+    if (currentUserId && persistentPublicationRanks.length > 0) {
+        await saveCachedData(currentUserId, coreRankCounts, sjrRankCounts, persistentPublicationRanks, cachedDblpPidForSave);
     }
     displaySummaryPanel(coreRankCounts, sjrRankCounts, currentUserId, determinedPublicationRanks, Date.now(), cachedDblpPidForSave);
 
