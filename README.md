@@ -33,6 +33,7 @@ Google Scholar is great at collecting publications but **terrible at showing th
 | 🏷 **Rank badges**        | A\*, A, B, C colour‑coded inline next to each paper title, reflecting the historical rank.                                                |
 | 📊 **Summary panel**      | Totals for A\*, A, B, C, N/A papers on the profile, aggregated across all processed publications.                                         |
 | 🧹 **Name cleanup**       | Trailing titles like "PhD" or "Dr." are removed before DBLP lookup for better matches. |
+| 📰 **Journal quartiles**  | Looks up SCImago Journal Rankings (SJR) in real time, adds circular Q1–Q4 badges, and keeps dedicated totals. |
 
 
 ## Quick Install
@@ -72,6 +73,13 @@ Google Scholar is great at collecting publications but **terrible at showing th
 ## Data Source and Acknowledgements
 
 This extension uses historical **CORE Conference Rankings** from the years **2023, 2021, 2020, 2018, 2017, and 2014**, courtesy of [**Australasian Computing Research and Education (CORE)**](https://www.linkedin.com/company/australasian-computing-research-and-education-core/). Please refer to the official [CORE portal](http://portal.core.edu.au/conf-ranks/) for the most authoritative data.
+
+### How SCImago (SJR) data is fetched
+
+*   **No bundled dump:** The extension does **not** ship with a pre-downloaded SCImago journal list. Instead, it resolves journals on demand to ensure the latest quartile information is shown.
+*   **Live lookup:** When a DBLP venue is identified as a journal, the content script builds a query to [`https://www.scimagojr.com/journalsearch.php`](https://www.scimagojr.com/journalsearch.php), fetches the response through a read-only CORS proxy, and extracts candidate journal identifiers from the HTML search results.
+*   **Detail parsing:** For each candidate identifier, the script loads the detail page (still via the proxy) and parses the table of yearly quartiles, picking the most recent year and its best quartile. This value is cached locally in browser storage so repeated visits reuse the resolved quartile without re-fetching.
+*   **Reliability safeguards:** Journal names are normalised before matching (lowercasing, expanding abbreviations, removing punctuation) and scored with a Jaro–Winkler similarity check to avoid mismatches; only quartiles explicitly listed as `Q1`–`Q4` are accepted.
 
 ## Contributing & Bug Reports (BETA)
 
