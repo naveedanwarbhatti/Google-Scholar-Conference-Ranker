@@ -1,13 +1,13 @@
 ![Version 1.6.5](https://img.shields.io/badge/version-1.6.5-blue.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-# Google Scholar Conference Ranker (CORE Edition)
+# Google Scholar Venue Ranker
 
 
 
-**Instantly see CORE conference rankings directly on Google Scholar profile pages! Essential for researchers in Computer Science, Electrical Engineering, and related fields.**
+**Instantly see CORE conference rankings and SJR journal quartiles directly on Google Scholar profile pages—essential context for researchers in Computer Science, Electrical Engineering, and related fields.**
 
-This Chrome extension enhances your Google Scholar experience by automatically fetching and displaying [CORE Conference Rankings](http://portal.core.edu.au/conf-ranks/) for publications. It helps you quickly assess the prestige of conference venues without leaving the Scholar page.
+This Chrome extension enhances your Google Scholar experience by automatically fetching and displaying [CORE Conference Rankings](http://portal.core.edu.au/conf-ranks/) for conference publications alongside [SCImago Journal Rank (SJR)](https://www.scimagojr.com/) quartiles for journals. It helps you quickly assess the prestige of publication venues without leaving the Scholar page.
 
 ![Screenshot of Extension in Action](Images/Screenshot.png)
 
@@ -21,18 +21,19 @@ This Chrome extension enhances your Google Scholar experience by automatically f
 
 ### Why?
 
-Google Scholar is great at collecting publications but **terrible at showing the prestige of conference venues**—a crucial signal in CS and EE. This add‑on pulls the official **CORE 2023 (and also historical)** list and surfaces each publication’s tier directly in the interface.
+Google Scholar is great at collecting publications but **terrible at showing the prestige of publication venues**—a crucial signal in CS and EE. This add‑on pulls the official **CORE 2023 (and historical)** conference lists and the **latest SJR journal quartiles**, surfacing each publication’s tier directly in the interface.
 
 ---
 
 ## Features
 
-| Feature                   | Description                                                                                                                               |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| 🎯 **Historical Matching** | Selects the appropriate CORE ranking list (2023, 2021, 2020, 2018, 2017, 2014) based on the publication's year. Applies multiple heuristics for matching. |
-| 🏷 **Rank badges**        | A\*, A, B, C colour‑coded inline next to each paper title, reflecting the historical rank.                                                |
-| 📊 **Summary panel**      | Totals for A\*, A, B, C, N/A papers on the profile, aggregated across all processed publications.                                         |
-| 🧹 **Name cleanup**       | Trailing titles like "PhD" or "Dr." are removed before DBLP lookup for better matches. |
+| Feature                   | Description |
+| ------------------------- | ----------- |
+| 🎯 **Historical Matching** | Selects the appropriate CORE ranking list (2023, 2021, 2020, 2018, 2017, 2014) based on the publication's year and applies multiple heuristics for matching. |
+| 🏷 **Rank badges**        | Shows colour‑coded A\*, A, B, C badges inline next to each conference paper title to reflect its historical rank. |
+| 📊 **Summary panel**      | Totals conference ranks (A\*, A, B, C, N/A) and SJR quartiles, aggregated across the processed publications. |
+| 📚 **Journal insights**   | Adds SJR quartile badges (Q1–Q4) next to journal papers using the latest SCImago data set. |
+| 🧹 **Name cleanup**       | Removes trailing titles like "PhD" or "Dr." before DBLP lookup for better matches. |
 
 
 ## Quick Install
@@ -54,7 +55,7 @@ Google Scholar is great at collecting publications but **terrible at showing th
     *   Select the **root directory** of the extension (the folder where `manifest.json` is located, e.g., the `Google-Scholar-Conference-Ranker` folder you downloaded/cloned).
 
 3.  **Verify:**
-    *   The "Google Scholar Conference Ranker" should now appear in your list of extensions and be enabled.
+    *   The "Google Scholar Venue Ranker" should now appear in your list of extensions and be enabled.
     *   Navigate to a Google Scholar profile page (e.g., `https://scholar.google.com/citations?user=...`). The extension should automatically run. You should see the progress bar, then the summary panel, and ranks next to papers.
 
 
@@ -71,7 +72,7 @@ Google Scholar is great at collecting publications but **terrible at showing th
 
 ## Data Source and Acknowledgements
 
-This extension uses historical **CORE Conference Rankings** from the years **2023, 2021, 2020, 2018, 2017, and 2014**, courtesy of [**Australasian Computing Research and Education (CORE)**](https://www.linkedin.com/company/australasian-computing-research-and-education-core/). Please refer to the official [CORE portal](http://portal.core.edu.au/conf-ranks/) for the most authoritative data.
+This extension uses historical **CORE Conference Rankings** from the years **2023, 2021, 2020, 2018, 2017, and 2014**, courtesy of [**Australasian Computing Research and Education (CORE)**](https://www.linkedin.com/company/australasian-computing-research-and-education-core/), and combines them with the latest **SCImago Journal Rank (SJR)** data set from [scimagojr.com](https://www.scimagojr.com/). Please refer to the official [CORE portal](http://portal.core.edu.au/conf-ranks/) and [SCImago portal](https://www.scimagojr.com/journalrank.php) for the most authoritative data.
 
 ## Contributing & Bug Reports (BETA)
 
