@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Google Scholar Conference Ranker",
-  "description": "Classifies conferences on Google Scholar profiles using CORE current and historic rankings. Integrates DBLP for improved accuracy.",
-  "version": "1.6.5",
+  "name": "Scholar Venue Ranker",
+  "description": "Adds CORE conference tiers and SJR journal quartiles to Google Scholar publications with DBLP-assisted venue matching.",
+  "version": "1.7",
   "permissions": [
     "storage"
   ],
@@ -57,19 +57,20 @@
         "https://scholar.google.ro/*",
         "https://scholar.google.ru/*",
         "https://scholar.google.se/*",
-        "https://scholar.google.sg/*", 
+        "https://scholar.google.sg/*",
         "https://scholar.google.si/*",
         "https://scholar.google.sk/*",
         "https://scholar.google.ua/*",
         "https://scholar.google.us/*",
-		"https://dblp.org/",
-		"https://sparql.dblp.org/"
+        "https://dblp.org/",
+        "https://sparql.dblp.org/"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
-
   "host_permissions": [
     "https://scholar.google.com/*",
     "https://scholar.google.co.uk/*",
@@ -119,26 +120,25 @@
     "https://scholar.google.ro/*",
     "https://scholar.google.ru/*",
     "https://scholar.google.se/*",
-    "https://scholar.google.sg/*", 
+    "https://scholar.google.sg/*",
     "https://scholar.google.si/*",
     "https://scholar.google.sk/*",
     "https://scholar.google.ua/*",
     "https://scholar.google.us/*",
-    "https://dblp.org/*"  
+    "https://dblp.org/*"
   ],
-
   "web_accessible_resources": [
     {
       "resources": [
-      "core/CORE_2014.json",
-      "core/CORE_2017.json",
-      "core/CORE_2018.json",
-      "core/CORE_2020.json",
-      "core/CORE_2021.json",
-      "core/CORE_2023.json",
-      "sjr/*.csv"
-    ],
-      "matches": [ 
+        "core/CORE_2014.json",
+        "core/CORE_2017.json",
+        "core/CORE_2018.json",
+        "core/CORE_2020.json",
+        "core/CORE_2021.json",
+        "core/CORE_2023.json",
+        "sjr/*.csv"
+      ],
+      "matches": [
         "https://scholar.google.com/*",
         "https://scholar.google.co.uk/*",
         "https://scholar.google.co.jp/*",
@@ -195,10 +195,9 @@
       ]
     }
   ],
-
   "icons": {
-    "16":  "icons/icon16.png",
-    "48":  "icons/icon48.png",
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   }
 }
