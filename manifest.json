@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Scholar Venue Ranker (CORE + SJR)",
+  "name": "Scholar Venue Ranker",
   "description": "Adds CORE conference tiers and SJR journal quartiles to Google Scholar publications with DBLP-assisted venue matching.",
   "version": "1.6.5",
   "permissions": [
