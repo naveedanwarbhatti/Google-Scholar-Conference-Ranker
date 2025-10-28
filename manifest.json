@@ -135,8 +135,7 @@
       "core/CORE_2018.json",
       "core/CORE_2020.json",
       "core/CORE_2021.json",
-      "core/CORE_2023.json",
-      "sjr/*.csv"
+      "core/CORE_2023.json"
     ],
       "matches": [ 
         "https://scholar.google.com/*",
