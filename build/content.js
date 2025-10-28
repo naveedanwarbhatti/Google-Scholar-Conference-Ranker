@@ -82,34 +82,63 @@ let scholarUrlToDblpInfoMap = new Map();
 const streamMetaCache = new Map();
 /** --------  REPLACE the old fetchDblpStreamMetadata  -------- */
 async function fetchDblpStreamMetadata(streamXmlUrl) {
-    // extract "buildsys" from https://dblp.org/streams/conf/buildsys.xml
-    const streamId = streamXmlUrl.match(/\/conf\/([^/]+)\.xml$/)?.[1];
-    if (!streamId)
+    // extract stream type & id from URLs like https://dblp.org/streams/conf/buildsys.xml
+    // or https://dblp.org/streams/journals/jpdc.xml
+    const match = streamXmlUrl.match(/\/streams\/(conf|journals)\/([^/]+)\.xml$/);
+    if (!match)
         return null; // malformed url – fall back to previous behaviour
-    if (!streamMetaCache.has(streamId)) {
-        streamMetaCache.set(streamId, (async () => {
+    const [, streamType, streamId] = match;
+    const cacheKey = `${streamType}:${streamId}`;
+    if (!streamMetaCache.has(cacheKey)) {
+        streamMetaCache.set(cacheKey, (async () => {
             try {
                 const resp = await fetch(streamXmlUrl);
-                if (!resp.ok)
-                    return null;
-                const xml = await resp.text();
-                const doc = new DOMParser().parseFromString(xml, "application/xml");
-                if (doc.querySelector("parsererror"))
-                    return null;
-                const conf = doc.querySelector("dblpstreams > conf");
-                return conf
-                    ? {
-                        acronym: conf.querySelector("acronym")?.textContent?.trim() ?? null,
-                        title: conf.querySelector("title")?.textContent?.trim() ?? null,
+                if (resp.ok) {
+                    const xml = await resp.text();
+                    const doc = new DOMParser().parseFromString(xml, "application/xml");
+                    if (!doc.querySelector("parsererror")) {
+                        const nodeSelector = streamType === "conf" ? "dblpstreams > conf" : "dblpstreams > journal";
+                        const node = doc.querySelector(nodeSelector);
+                        if (node) {
+                            const rawTitle = node.querySelector("title")?.textContent ?? "";
+                            const title = rawTitle ? rawTitle.replace(/\s+/g, " ").trim() : null;
+                            const acronymNodeName = streamType === "conf" ? "acronym" : "short";
+                            const acronym = node.querySelector(acronymNodeName)?.textContent?.trim() ?? null;
+                            if (title || acronym) {
+                                return { acronym, title };
+                            }
+                        }
                     }
-                    : null;
+                }
             }
             catch {
-                return null;
+                // ignore and fall back below
             }
+            if (streamType === "journals") {
+                try {
+                    const indexUrl = `https://dblp.org/db/journals/${streamId}/index.xml`;
+                    const indexResp = await fetch(indexUrl);
+                    if (!indexResp.ok)
+                        return null;
+                    const indexXml = await indexResp.text();
+                    const indexDoc = new DOMParser().parseFromString(indexXml, "application/xml");
+                    if (indexDoc.querySelector("parsererror"))
+                        return null;
+                    const titleAttr = indexDoc.querySelector("bht")?.getAttribute("title")?.trim();
+                    const h1Title = indexDoc.querySelector("h1")?.textContent?.replace(/\s+/g, " ").trim();
+                    const title = titleAttr || h1Title || null;
+                    if (title) {
+                        return { acronym: null, title };
+                    }
+                }
+                catch {
+                    return null;
+                }
+            }
+            return null;
         })());
     }
-    return streamMetaCache.get(streamId);
+    return streamMetaCache.get(cacheKey);
 }
 function getScholarUserId() {
     const params = new URLSearchParams(window.location.search);
@@ -1806,14 +1835,27 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
             let venue_full = null;
             const pubUrl = item.querySelector("url")?.textContent?.trim();
             if (pubUrl) {
-                const streamMatch = pubUrl.match(/^db\/conf\/[^/]+\/([a-zA-Z][\w-]*?)(\d{4}.*)?\.html/);
-                if (streamMatch?.[1]) {
-                    const streamId = streamMatch[1];
+                let streamMeta = null;
+                const confMatch = pubUrl.match(/^db\/conf\/[^/]+\/([a-zA-Z][\w-]*?)(\d{4}.*)?\.html/);
+                if (confMatch?.[1]) {
+                    const streamId = confMatch[1];
                     const streamXmlUrl = `https://dblp.org/streams/conf/${streamId}.xml`;
-                    const streamMeta = await fetchDblpStreamMetadata(streamXmlUrl);
-                    if (streamMeta) {
-                        acronym = streamMeta.acronym ?? null;
-                        venue_full = streamMeta.title ?? null;
+                    streamMeta = await fetchDblpStreamMetadata(streamXmlUrl);
+                }
+                else {
+                    const journalMatch = pubUrl.match(/^db\/journals\/([a-zA-Z][\w-]*)\//);
+                    if (journalMatch?.[1]) {
+                        const journalId = journalMatch[1];
+                        const streamXmlUrl = `https://dblp.org/streams/journals/${journalId}.xml`;
+                        streamMeta = await fetchDblpStreamMetadata(streamXmlUrl);
+                    }
+                }
+                if (streamMeta) {
+                    if (streamMeta.acronym) {
+                        acronym = streamMeta.acronym;
+                    }
+                    if (streamMeta.title) {
+                        venue_full = streamMeta.title;
                     }
                 }
             }
