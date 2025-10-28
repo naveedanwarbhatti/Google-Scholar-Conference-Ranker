@@ -428,26 +428,6 @@ function normalizeJournalName(name) {
         return "";
     return cleanTextForComparison(name, false);
 }
-const ORG_PREFIXES_TO_IGNORE = [
-    "acm/ieee", "ieee/acm", "acm-ieee", "ieee-acm", "acm sigplan", "acm sigops", "acm sigbed", "acm sigcomm",
-    "acm sigmod", "acm sigarch", "acm sigsac", "acm", "ieee", "ifip", "usenix", "eurographics", "springer",
-    "elsevier", "wiley", "sigplan", "sigops", "sigbed", "sigcomm", "sigmod", "sigarch", "sigsac",
-    "international", "national", "annual"
-];
-function stripOrgPrefixes(text) {
-    let currentText = text;
-    let strippedSomething;
-    do {
-        strippedSomething = false;
-        for (const prefix of ORG_PREFIXES_TO_IGNORE) {
-            if (currentText.startsWith(prefix + " ") || currentText === prefix) {
-                currentText = currentText.substring(prefix.length).trim();
-                strippedSomething = true;
-            }
-        }
-    } while (strippedSomething && currentText.length > 0);
-    return currentText;
-}
 function isArxivLikeVenue(info) {
     const key = info.dblpKey?.toLowerCase() ?? "";
     if (key.startsWith('journals/corr') || key.includes('/corr/')) {
@@ -472,38 +452,21 @@ function isArxivLikeVenue(info) {
     }
     return false;
 }
-const SJR_AVAILABLE_YEARS = Array.from({ length: 15 }, (_, index) => 2010 + index);
-const MIN_SJR_MATCH_SCORE = 0.94;
+const SJR_DATASET_START_YEAR = 2010;
+const SJR_DATASET_END_YEAR = 2024;
 const sjrLookupCache = new Map();
 let sjrDatasetPromise = null;
-function getRuntimeResourceUrl(path) {
-    if (typeof chrome !== 'undefined' && chrome?.runtime?.getURL) {
-        return chrome.runtime.getURL(path);
-    }
-    return path;
-}
-function parseSemicolonSeparatedCsv(text) {
+function parseSjrCsv(text) {
     const rows = [];
+    let currentField = '';
     let currentRow = [];
-    let currentValue = '';
     let inQuotes = false;
-    const pushValue = () => {
-        currentRow.push(currentValue);
-        currentValue = '';
-    };
-    const finishRow = () => {
-        if (inQuotes) {
-            return;
-        }
-        pushValue();
-        rows.push(currentRow);
-        currentRow = [];
-    };
-    for (let i = 0; i < text.length; i++) {
-        const char = text[i];
+    const sanitized = text.replace(/\ufeff/g, '');
+    for (let i = 0; i < sanitized.length; i++) {
+        const char = sanitized[i];
         if (char === '"') {
-            if (inQuotes && text[i + 1] === '"') {
-                currentValue += '"';
+            if (inQuotes && sanitized[i + 1] === '"') {
+                currentField += '"';
                 i++;
             }
             else {
@@ -511,204 +474,124 @@ function parseSemicolonSeparatedCsv(text) {
             }
         }
         else if (char === ';' && !inQuotes) {
-            pushValue();
+            currentRow.push(currentField);
+            currentField = '';
         }
         else if ((char === '\n' || char === '\r') && !inQuotes) {
-            if (char === '\r' && text[i + 1] === '\n') {
+            if (char === '\r' && sanitized[i + 1] === '\n') {
                 i++;
             }
-            finishRow();
+            currentRow.push(currentField);
+            currentField = '';
+            if (currentRow.some(value => value.trim().length > 0)) {
+                rows.push(currentRow);
+            }
+            currentRow = [];
         }
         else {
-            currentValue += char;
+            currentField += char;
         }
     }
-    if (inQuotes) {
-        // Unbalanced quotes – treat the remaining value as a cell.
-        inQuotes = false;
-    }
-    if (currentValue.length > 0 || currentRow.length > 0) {
-        pushValue();
-        rows.push(currentRow);
+    if (currentField.length > 0 || currentRow.length > 0) {
+        currentRow.push(currentField);
+        if (currentRow.some(value => value.trim().length > 0)) {
+            rows.push(currentRow);
+        }
     }
     return rows;
 }
-function buildBucketKey(value, length) {
-    const normalized = value.trim();
-    if (!normalized) {
-        return '#';
-    }
-    if (normalized.length < length) {
-        return normalized;
-    }
-    return normalized.substring(0, length);
+function createTokenSet(normalizedTitle) {
+    const STOP_WORDS = new Set(['and', 'the', 'of', 'for', 'in', 'on', 'journal', 'international', 'transactions', 'letters']);
+    const tokens = normalizedTitle
+        .split(' ')
+        .map(token => token.trim())
+        .filter(token => token.length >= 3 && !STOP_WORDS.has(token));
+    return new Set(tokens);
 }
-function addToBucket(map, key, entry) {
-    const bucketKey = key || '#';
-    const list = map.get(bucketKey);
-    if (list) {
-        if (!list.includes(entry)) {
-            list.push(entry);
-        }
-    }
-    else {
-        map.set(bucketKey, [entry]);
-    }
-}
-function buildNormalizedVariants(normalized) {
-    const variants = new Set();
-    const trimmed = normalized.trim();
-    if (trimmed) {
-        variants.add(trimmed);
-    }
-    const withoutPrefixes = stripOrgPrefixes(trimmed);
-    if (withoutPrefixes && !variants.has(withoutPrefixes)) {
-        variants.add(withoutPrefixes);
-    }
-    if (trimmed.endsWith(' journal')) {
-        variants.add(trimmed.slice(0, -' journal'.length).trim());
-    }
-    if (trimmed.endsWith(' journals')) {
-        variants.add(trimmed.slice(0, -' journals'.length).trim());
-    }
-    if (trimmed.startsWith('the ')) {
-        variants.add(trimmed.substring(4).trim());
-    }
-    return Array.from(variants).filter(value => value.length > 0);
+function chooseBetterQuartile(existing, nextValue) {
+    if (!nextValue)
+        return existing;
+    if (!existing)
+        return nextValue;
+    const parse = (value) => {
+        const match = value.match(/^Q(\d)$/i);
+        return match ? parseInt(match[1], 10) : Number.POSITIVE_INFINITY;
+    };
+    return parse(nextValue) < parse(existing) ? nextValue : existing;
 }
 async function loadSjrDataset() {
-    if (!sjrDatasetPromise) {
-        sjrDatasetPromise = (async () => {
-            const exactMatches = new Map();
-            const bucketMap = new Map();
-            const entries = [];
-            const entryLookup = new Map();
-            for (const year of SJR_AVAILABLE_YEARS) {
-                const datasetPath = `sjr/scimagojr ${year}.csv`;
-                const resourceUrl = getRuntimeResourceUrl(datasetPath);
-                try {
-                    const response = await fetch(resourceUrl);
-                    if (!response.ok) {
-                        console.warn(`Unable to load SJR data for ${year}: ${response.status}`);
-                        continue;
-                    }
-                    const csvText = await response.text();
-                    const rows = parseSemicolonSeparatedCsv(csvText);
-                    if (rows.length === 0) {
-                        continue;
-                    }
-                    const header = rows.shift();
-                    if (!header) {
-                        continue;
-                    }
-                    const lowerHeader = header.map(value => value.trim().toLowerCase());
-                    const titleIndex = lowerHeader.indexOf('title');
-                    const typeIndex = lowerHeader.indexOf('type');
-                    const quartileIndex = lowerHeader.indexOf('sjr best quartile');
-                    if (titleIndex === -1 || quartileIndex === -1) {
-                        continue;
-                    }
-                    for (const row of rows) {
-                        const titleRaw = row[titleIndex]?.trim();
-                        const typeRaw = typeIndex >= 0 ? row[typeIndex]?.trim().toLowerCase() : '';
-                        if (!titleRaw) {
-                            continue;
-                        }
-                        if (typeRaw && (typeRaw.includes('conference') || typeRaw.includes('proceedings'))) {
-                            continue;
-                        }
-                        const quartileCandidate = row[quartileIndex]?.trim().toUpperCase();
-                        if (!quartileCandidate || !SJR_QUARTILES.includes(quartileCandidate)) {
-                            continue;
-                        }
-                        const quartile = quartileCandidate;
-                        const normalizedTitle = normalizeJournalName(titleRaw);
-                        if (!normalizedTitle) {
-                            continue;
-                        }
-                        const normalizedWithoutPrefix = stripOrgPrefixes(normalizedTitle);
-                        const lookupKey = `${normalizedTitle}\u241F${titleRaw.toLowerCase()}`;
-                        let entry = entryLookup.get(lookupKey);
-                        if (!entry) {
-                            entry = {
-                                normalizedTitle,
-                                normalizedWithoutPrefix,
-                                resolvedTitle: titleRaw,
-                                quartilesByYear: {}
-                            };
-                            entryLookup.set(lookupKey, entry);
-                            entries.push(entry);
-                            addToBucket(bucketMap, buildBucketKey(normalizedTitle, 2), entry);
-                            addToBucket(bucketMap, buildBucketKey(normalizedTitle, 1), entry);
-                            if (normalizedWithoutPrefix && normalizedWithoutPrefix !== normalizedTitle) {
-                                addToBucket(bucketMap, buildBucketKey(normalizedWithoutPrefix, 2), entry);
-                                addToBucket(bucketMap, buildBucketKey(normalizedWithoutPrefix, 1), entry);
-                            }
-                        }
-                        entry.quartilesByYear[year] = quartile;
-                        const keysForEntry = buildNormalizedVariants(normalizedTitle);
-                        if (normalizedWithoutPrefix && normalizedWithoutPrefix !== normalizedTitle) {
-                            keysForEntry.push(normalizedWithoutPrefix);
-                        }
-                        for (const key of keysForEntry) {
-                            const list = exactMatches.get(key);
-                            if (list) {
-                                if (!list.includes(entry)) {
-                                    list.push(entry);
-                                }
-                            }
-                            else {
-                                exactMatches.set(key, [entry]);
-                            }
-                        }
-                    }
+    const byNormalized = new Map();
+    const entries = [];
+    for (let year = SJR_DATASET_START_YEAR; year <= SJR_DATASET_END_YEAR; year++) {
+        const datasetPath = `sjr/scimagojr ${year}.csv`;
+        try {
+            const url = chrome.runtime.getURL(datasetPath);
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.error(`Failed to fetch ${datasetPath}: ${response.status} ${response.statusText}`);
+                continue;
+            }
+            const text = await response.text();
+            const rows = parseSjrCsv(text);
+            if (rows.length === 0)
+                continue;
+            const header = rows[0].map(cell => cell.trim().toLowerCase());
+            const titleIndex = header.findIndex(cell => cell === 'title');
+            const quartileIndex = header.findIndex(cell => cell === 'sjr best quartile');
+            const typeIndex = header.findIndex(cell => cell === 'type');
+            if (titleIndex === -1 || quartileIndex === -1) {
+                console.warn(`Skipping ${datasetPath} because header columns were not found.`);
+                continue;
+            }
+            for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
+                const row = rows[rowIndex];
+                if (!row || row.length <= Math.max(titleIndex, quartileIndex))
+                    continue;
+                const type = typeIndex >= 0 ? row[typeIndex]?.trim().toLowerCase() : '';
+                if (type && type !== 'journal')
+                    continue;
+                const title = row[titleIndex]?.trim();
+                const quartileRaw = row[quartileIndex]?.trim().toUpperCase();
+                if (!title)
+                    continue;
+                const normalizedTitle = normalizeJournalName(title);
+                if (!normalizedTitle)
+                    continue;
+                const quartile = quartileRaw && /^Q[1-4]$/i.test(quartileRaw) ? quartileRaw.toUpperCase() : undefined;
+                let entry = byNormalized.get(normalizedTitle);
+                if (!entry) {
+                    entry = {
+                        normalizedTitle,
+                        resolvedTitle: title,
+                        quartilesByYear: {},
+                        tokenSet: createTokenSet(normalizedTitle)
+                    };
+                    byNormalized.set(normalizedTitle, entry);
+                    entries.push(entry);
                 }
-                catch (error) {
-                    console.error(`Failed to load SJR data for ${year}:`, error);
+                else if (title.length > entry.resolvedTitle.length) {
+                    entry.resolvedTitle = title;
+                }
+                if (quartile) {
+                    const current = entry.quartilesByYear[year];
+                    const best = chooseBetterQuartile(current, quartile);
+                    if (best) {
+                        entry.quartilesByYear[year] = best;
+                    }
                 }
             }
-            return { exact: exactMatches, buckets: bucketMap, entries };
-        })();
+        }
+        catch (error) {
+            console.error(`Error loading SJR dataset for ${year}:`, error);
+        }
+    }
+    return { byNormalized, entries };
+}
+function ensureSjrDataset() {
+    if (!sjrDatasetPromise) {
+        sjrDatasetPromise = loadSjrDataset();
     }
     return sjrDatasetPromise;
-}
-function collectSjrCandidates(variants, dataset) {
-    const candidateSet = new Set();
-    for (const variant of variants) {
-        const twoCharKey = buildBucketKey(variant, 2);
-        const oneCharKey = buildBucketKey(variant, 1);
-        const buckets = [dataset.buckets.get(twoCharKey), dataset.buckets.get(oneCharKey)];
-        for (const bucket of buckets) {
-            if (!bucket)
-                continue;
-            for (const entry of bucket) {
-                candidateSet.add(entry);
-            }
-        }
-    }
-    return Array.from(candidateSet);
-}
-function pickBestEntry(entries, publicationYear) {
-    if (entries.length === 0) {
-        return null;
-    }
-    let bestEntry = null;
-    let bestScore = -Infinity;
-    for (const entry of entries) {
-        const { quartile, year } = selectQuartileForYear(entry, publicationYear);
-        if (!quartile || year === null) {
-            continue;
-        }
-        const quartileValue = Number(quartile.substring(1));
-        const quartileScore = quartileValue ? 5 - quartileValue : 0;
-        const recencyScore = publicationYear && year ? -Math.abs(publicationYear - year) : 0;
-        const totalScore = quartileScore * 10 + recencyScore;
-        if (totalScore > bestScore) {
-            bestScore = totalScore;
-            bestEntry = entry;
-        }
-    }
-    return bestEntry ?? entries[0] ?? null;
 }
 function selectQuartileForYear(data, publicationYear) {
     const entries = Object.entries(data.quartilesByYear)
@@ -718,22 +601,58 @@ function selectQuartileForYear(data, publicationYear) {
     if (entries.length === 0) {
         return { quartile: null, year: null };
     }
-    const latestEntry = entries[0];
-    const earliestEntry = entries[entries.length - 1];
     if (publicationYear) {
-        const matchingYear = entries.find(entry => entry.year === publicationYear);
+        const targetYear = Math.max(SJR_DATASET_START_YEAR, publicationYear);
+        const matchingYear = entries.find(entry => entry.year === targetYear);
         if (matchingYear) {
             return { quartile: matchingYear.quartile, year: matchingYear.year };
         }
-        if (publicationYear < earliestEntry.year) {
-            return { quartile: earliestEntry.quartile, year: earliestEntry.year };
-        }
-        const previousYear = entries.find(entry => entry.year < publicationYear);
+        const previousYear = entries.find(entry => entry.year < targetYear);
         if (previousYear) {
             return { quartile: previousYear.quartile, year: previousYear.year };
         }
     }
+    const latestEntry = entries[0];
     return { quartile: latestEntry.quartile, year: latestEntry.year };
+}
+function findBestSjrMatch(normalizedQuery, dataset) {
+    const directMatch = dataset.byNormalized.get(normalizedQuery);
+    if (directMatch) {
+        return directMatch;
+    }
+    const queryTokens = normalizedQuery
+        .split(' ')
+        .map(token => token.trim())
+        .filter(token => token.length >= 3);
+    const queryTokenSet = new Set(queryTokens);
+    const candidates = [];
+    for (const entry of dataset.entries) {
+        let sharesToken = queryTokens.length === 0;
+        if (!sharesToken) {
+            for (const token of queryTokenSet) {
+                if (entry.tokenSet.has(token)) {
+                    sharesToken = true;
+                    break;
+                }
+            }
+        }
+        if (!sharesToken) {
+            continue;
+        }
+        const score = jaroWinkler(normalizedQuery, entry.normalizedTitle);
+        if (score >= 0.98) {
+            return entry;
+        }
+        if (score >= 0.88) {
+            candidates.push({ score, entry });
+        }
+    }
+    if (candidates.length === 0) {
+        return null;
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    const best = candidates[0];
+    return best.score >= FUZZY_THRESHOLD ? best.entry : null;
 }
 async function resolveSjrQuartile(journalName, publicationYear) {
     const normalizedQuery = normalizeJournalName(journalName);
@@ -749,52 +668,25 @@ async function resolveSjrQuartile(journalName, publicationYear) {
             return { status: 'success', quartile, year, resolvedTitle: cachedEntry.data.resolvedTitle };
         }
     }
-    const dataset = await loadSjrDataset();
-    const variants = buildNormalizedVariants(normalizedQuery);
-    for (const variant of variants) {
-        const matches = dataset.exact.get(variant);
-        if (matches && matches.length > 0) {
-            const selected = pickBestEntry(matches, publicationYear ?? null);
-            if (selected) {
-                sjrLookupCache.set(normalizedQuery, { kind: 'success', data: selected });
-                for (const key of variants) {
-                    sjrLookupCache.set(key, { kind: 'success', data: selected });
-                }
-                const { quartile, year } = selectQuartileForYear(selected, publicationYear ?? null);
-                if (quartile) {
-                    return { status: 'success', quartile, year, resolvedTitle: selected.resolvedTitle };
-                }
-            }
+    try {
+        const dataset = await ensureSjrDataset();
+        const entry = findBestSjrMatch(normalizedQuery, dataset);
+        if (!entry) {
+            sjrLookupCache.set(normalizedQuery, { kind: 'not_found' });
+            return { status: 'not_found' };
         }
+        const data = {
+            resolvedTitle: entry.resolvedTitle,
+            quartilesByYear: { ...entry.quartilesByYear }
+        };
+        sjrLookupCache.set(normalizedQuery, { kind: 'success', data });
+        const { quartile, year } = selectQuartileForYear(data, publicationYear ?? null);
+        return { status: 'success', quartile, year, resolvedTitle: data.resolvedTitle };
     }
-    const candidateEntries = collectSjrCandidates(variants, dataset);
-    const pool = candidateEntries.length > 0 ? candidateEntries : dataset.entries;
-    let bestCandidate = null;
-    let bestScore = 0;
-    for (const candidate of pool) {
-        const candidateKeys = [candidate.normalizedTitle, candidate.normalizedWithoutPrefix].filter(Boolean);
-        for (const variant of variants) {
-            for (const candidateKey of candidateKeys) {
-                const score = jaroWinkler(variant, candidateKey);
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestCandidate = candidate;
-                }
-            }
-        }
+    catch (error) {
+        console.error('Error resolving SJR quartile from local dataset:', error);
+        return { status: 'error', transient: false };
     }
-    if (bestCandidate && bestScore >= MIN_SJR_MATCH_SCORE) {
-        const { quartile, year } = selectQuartileForYear(bestCandidate, publicationYear ?? null);
-        if (quartile) {
-            sjrLookupCache.set(normalizedQuery, { kind: 'success', data: bestCandidate });
-            for (const key of variants) {
-                sjrLookupCache.set(key, { kind: 'success', data: bestCandidate });
-            }
-            return { status: 'success', quartile, year, resolvedTitle: bestCandidate.resolvedTitle };
-        }
-    }
-    sjrLookupCache.set(normalizedQuery, { kind: 'not_found' });
-    return { status: 'not_found' };
 }
 const COMMON_ABBREVIATIONS = { "int'l": "international", "intl": "international", "conf\\.": "conference", "conf": "conference", "proc\\.": "proceedings", "proc": "proceedings", "symp\\.": "symposium", "symp": "symposium", "j\\.": "journal", "jour": "journal", "trans\\.": "transactions", "trans": "transactions", "annu\\.": "annual", "comput\\.": "computing", "commun\\.": "communications", "syst\\.": "systems", "sci\\.": "science", "tech\\.": "technical", "technol": "technology", "engin\\.": "engineering", "res\\.": "research", "adv\\.": "advances", "appl\\.": "applications", "lectures notes": "lecture notes", "lect notes": "lecture notes", "lncs": "lecture notes in computer science", };
 function cleanTextForComparison(text, isGoogleScholarVenue = false) {
@@ -852,6 +744,21 @@ function jaroWinkler(s1, s2) {
     const j = (matches / s1.length + matches / s2.length + (matches - trans) / matches) / 3;
     const l = Math.min(4, [...s1].findIndex((c, i) => c !== s2[i] || i >= s2.length));
     return j + l * 0.1 * (1 - j);
+}
+const ORG_PREFIXES_TO_IGNORE = ["acm/ieee", "ieee/acm", "acm-ieee", "ieee-acm", "acm sigplan", "acm sigops", "acm sigbed", "acm sigcomm", "acm sigmod", "acm sigarch", "acm sigsac", "acm", "ieee", "ifip", "usenix", "eurographics", "springer", "elsevier", "wiley", "sigplan", "sigops", "sigbed", "sigcomm", "sigmod", "sigarch", "sigsac", "international", "national", "annual"];
+function stripOrgPrefixes(text) {
+    let currentText = text;
+    let strippedSomething;
+    do {
+        strippedSomething = false;
+        for (const prefix of ORG_PREFIXES_TO_IGNORE) {
+            if (currentText.startsWith(prefix + " ") || currentText === prefix) {
+                currentText = currentText.substring(prefix.length).trim();
+                strippedSomething = true;
+            }
+        }
+    } while (strippedSomething && currentText.length > 0);
+    return currentText;
 }
 function findRankForVenue(venueKey, coreData, fullVenueTitle = undefined) {
     const trimmedVenueKey = venueKey?.trim();

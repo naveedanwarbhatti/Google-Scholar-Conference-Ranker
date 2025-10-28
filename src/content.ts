@@ -497,9 +497,8 @@ function isArxivLikeVenue(info: { venue: string | null; venue_full?: string | nu
     return false;
 }
 
-const SJR_SEARCH_BASE_URL = 'https://www.scimagojr.com/journalsearch.php';
-const SJR_PROXY_PREFIX = 'https://r.jina.ai/';
-const MAX_SJR_CANDIDATES = 8;
+const SJR_DATASET_START_YEAR = 2010;
+const SJR_DATASET_END_YEAR = 2024;
 
 interface SjrQuartileData {
     resolvedTitle: string | null;
@@ -521,87 +520,163 @@ type SjrQuartileLookupResult =
     | { status: 'not_found' }
     | { status: 'error'; transient: boolean };
 
-type FetchScimagoOutcome =
-    | { ok: true; text: string }
-    | { ok: false; transient: boolean };
+interface SjrDatasetEntry {
+    normalizedTitle: string;
+    resolvedTitle: string;
+    quartilesByYear: Record<number, string>;
+    tokenSet: Set<string>;
+}
+
+interface SjrDataset {
+    byNormalized: Map<string, SjrDatasetEntry>;
+    entries: SjrDatasetEntry[];
+}
 
 const sjrLookupCache = new Map<string, SjrLookupCacheEntry>();
+let sjrDatasetPromise: Promise<SjrDataset> | null = null;
 
-function delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+function parseSjrCsv(text: string): string[][] {
+    const rows: string[][] = [];
+    let currentField = '';
+    let currentRow: string[] = [];
+    let inQuotes = false;
+    const sanitized = text.replace(/\ufeff/g, '');
+
+    for (let i = 0; i < sanitized.length; i++) {
+        const char = sanitized[i];
+
+        if (char === '"') {
+            if (inQuotes && sanitized[i + 1] === '"') {
+                currentField += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+            }
+        } else if (char === ';' && !inQuotes) {
+            currentRow.push(currentField);
+            currentField = '';
+        } else if ((char === '\n' || char === '\r') && !inQuotes) {
+            if (char === '\r' && sanitized[i + 1] === '\n') {
+                i++;
+            }
+            currentRow.push(currentField);
+            currentField = '';
+            if (currentRow.some(value => value.trim().length > 0)) {
+                rows.push(currentRow);
+            }
+            currentRow = [];
+        } else {
+            currentField += char;
+        }
+    }
+
+    if (currentField.length > 0 || currentRow.length > 0) {
+        currentRow.push(currentField);
+        if (currentRow.some(value => value.trim().length > 0)) {
+            rows.push(currentRow);
+        }
+    }
+
+    return rows;
 }
 
-async function fetchScimagoText(url: string, maxAttempts = 3): Promise<FetchScimagoOutcome> {
-    const proxiedUrl = `${SJR_PROXY_PREFIX}${url}`;
-    let lastTransientFailure = false;
+function createTokenSet(normalizedTitle: string): Set<string> {
+    const STOP_WORDS = new Set(['and', 'the', 'of', 'for', 'in', 'on', 'journal', 'international', 'transactions', 'letters']);
+    const tokens = normalizedTitle
+        .split(' ')
+        .map(token => token.trim())
+        .filter(token => token.length >= 3 && !STOP_WORDS.has(token));
+    return new Set(tokens);
+}
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+function chooseBetterQuartile(existing: string | undefined, nextValue: string | undefined): string | undefined {
+    if (!nextValue) return existing;
+    if (!existing) return nextValue;
+    const parse = (value: string) => {
+        const match = value.match(/^Q(\d)$/i);
+        return match ? parseInt(match[1], 10) : Number.POSITIVE_INFINITY;
+    };
+    return parse(nextValue) < parse(existing) ? nextValue : existing;
+}
+
+async function loadSjrDataset(): Promise<SjrDataset> {
+    const byNormalized = new Map<string, SjrDatasetEntry>();
+    const entries: SjrDatasetEntry[] = [];
+
+    for (let year = SJR_DATASET_START_YEAR; year <= SJR_DATASET_END_YEAR; year++) {
+        const datasetPath = `sjr/scimagojr ${year}.csv`;
         try {
-            const response = await fetch(proxiedUrl);
-            if (response.ok) {
-                return { ok: true, text: await response.text() };
+            const url = chrome.runtime.getURL(datasetPath);
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.error(`Failed to fetch ${datasetPath}: ${response.status} ${response.statusText}`);
+                continue;
             }
+            const text = await response.text();
+            const rows = parseSjrCsv(text);
+            if (rows.length === 0) continue;
 
-            const status = response.status;
-            const transient = status === 429 || status >= 500;
-            lastTransientFailure = lastTransientFailure || transient;
+            const header = rows[0].map(cell => cell.trim().toLowerCase());
+            const titleIndex = header.findIndex(cell => cell === 'title');
+            const quartileIndex = header.findIndex(cell => cell === 'sjr best quartile');
+            const typeIndex = header.findIndex(cell => cell === 'type');
 
-            if (attempt < maxAttempts - 1 && transient) {
-                await delay(500 * Math.pow(2, attempt));
+            if (titleIndex === -1 || quartileIndex === -1) {
+                console.warn(`Skipping ${datasetPath} because header columns were not found.`);
                 continue;
             }
 
-            return { ok: false, transient };
+            for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
+                const row = rows[rowIndex];
+                if (!row || row.length <= Math.max(titleIndex, quartileIndex)) continue;
+
+                const type = typeIndex >= 0 ? row[typeIndex]?.trim().toLowerCase() : '';
+                if (type && type !== 'journal') continue;
+
+                const title = row[titleIndex]?.trim();
+                const quartileRaw = row[quartileIndex]?.trim().toUpperCase();
+                if (!title) continue;
+
+                const normalizedTitle = normalizeJournalName(title);
+                if (!normalizedTitle) continue;
+
+                const quartile = quartileRaw && /^Q[1-4]$/i.test(quartileRaw) ? quartileRaw.toUpperCase() : undefined;
+
+                let entry = byNormalized.get(normalizedTitle);
+                if (!entry) {
+                    entry = {
+                        normalizedTitle,
+                        resolvedTitle: title,
+                        quartilesByYear: {},
+                        tokenSet: createTokenSet(normalizedTitle)
+                    };
+                    byNormalized.set(normalizedTitle, entry);
+                    entries.push(entry);
+                } else if (title.length > entry.resolvedTitle.length) {
+                    entry.resolvedTitle = title;
+                }
+
+                if (quartile) {
+                    const current = entry.quartilesByYear[year];
+                    const best = chooseBetterQuartile(current, quartile);
+                    if (best) {
+                        entry.quartilesByYear[year] = best;
+                    }
+                }
+            }
         } catch (error) {
-            console.warn('SJR fetch error for', url, error);
-            lastTransientFailure = true;
-            if (attempt < maxAttempts - 1) {
-                await delay(500 * Math.pow(2, attempt));
-                continue;
-            }
-            return { ok: false, transient: true };
+            console.error(`Error loading SJR dataset for ${year}:`, error);
         }
     }
 
-    return { ok: false, transient: lastTransientFailure };
+    return { byNormalized, entries };
 }
 
-function extractCandidateIdsFromSearch(text: string): string[] {
-    const ids = new Set<string>();
-    const regex = /journalsearch\.php\?q=(\d+)&tip=sid/gi;
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(text)) && ids.size < MAX_SJR_CANDIDATES) {
-        ids.add(match[1]);
+function ensureSjrDataset(): Promise<SjrDataset> {
+    if (!sjrDatasetPromise) {
+        sjrDatasetPromise = loadSjrDataset();
     }
-    return Array.from(ids);
-}
-
-function extractSjrTitle(text: string): string | null {
-    const titleMatch = text.match(/^Title:\s*(.+)$/m);
-    if (titleMatch && titleMatch[1]) {
-        return titleMatch[1].trim();
-    }
-    return null;
-}
-
-function parseSjrQuartilesFromText(text: string): Record<number, string> {
-    const quartileByYear = new Map<number, number>();
-    const regex = /\|\s*(\d{4})\s*\|\s*(Q[1-4])\s*\|/g;
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(text)) !== null) {
-        const year = parseInt(match[1], 10);
-        if (Number.isNaN(year)) continue;
-        const quartileValue = match[2];
-        const quartileNumber = parseInt(quartileValue.substring(1), 10);
-        if (!quartileByYear.has(year) || quartileNumber < quartileByYear.get(year)!) {
-            quartileByYear.set(year, quartileNumber);
-        }
-    }
-    const result: Record<number, string> = {};
-    for (const [year, quartileNumber] of quartileByYear.entries()) {
-        result[year] = `Q${quartileNumber}`;
-    }
-    return result;
+    return sjrDatasetPromise;
 }
 
 function selectQuartileForYear(
@@ -618,12 +693,13 @@ function selectQuartileForYear(
     }
 
     if (publicationYear) {
-        const matchingYear = entries.find(entry => entry.year === publicationYear);
+        const targetYear = Math.max(SJR_DATASET_START_YEAR, publicationYear);
+        const matchingYear = entries.find(entry => entry.year === targetYear);
         if (matchingYear) {
             return { quartile: matchingYear.quartile, year: matchingYear.year };
         }
 
-        const previousYear = entries.find(entry => entry.year < publicationYear);
+        const previousYear = entries.find(entry => entry.year < targetYear);
         if (previousYear) {
             return { quartile: previousYear.quartile, year: previousYear.year };
         }
@@ -631,6 +707,59 @@ function selectQuartileForYear(
 
     const latestEntry = entries[0];
     return { quartile: latestEntry.quartile, year: latestEntry.year };
+}
+
+function findBestSjrMatch(normalizedQuery: string, dataset: SjrDataset): SjrDatasetEntry | null {
+    const directMatch = dataset.byNormalized.get(normalizedQuery);
+    if (directMatch) {
+        return directMatch;
+    }
+
+    const queryTokens = normalizedQuery
+        .split(' ')
+        .map(token => token.trim())
+        .filter(token => token.length >= 3);
+    const queryTokenSet = new Set(queryTokens);
+
+    interface CandidateMatch {
+        score: number;
+        entry: SjrDatasetEntry;
+    }
+
+    const candidates: CandidateMatch[] = [];
+
+    for (const entry of dataset.entries) {
+        let sharesToken = queryTokens.length === 0;
+        if (!sharesToken) {
+            for (const token of queryTokenSet) {
+                if (entry.tokenSet.has(token)) {
+                    sharesToken = true;
+                    break;
+                }
+            }
+        }
+
+        if (!sharesToken) {
+            continue;
+        }
+
+        const score = jaroWinkler(normalizedQuery, entry.normalizedTitle);
+        if (score >= 0.98) {
+            return entry;
+        }
+
+        if (score >= 0.88) {
+            candidates.push({ score, entry });
+        }
+    }
+
+    if (candidates.length === 0) {
+        return null;
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    const best = candidates[0];
+    return best.score >= FUZZY_THRESHOLD ? best.entry : null;
 }
 
 async function resolveSjrQuartile(journalName: string, publicationYear?: number | null): Promise<SjrQuartileLookupResult> {
@@ -648,82 +777,26 @@ async function resolveSjrQuartile(journalName: string, publicationYear?: number 
         }
     }
 
-    const searchUrl = `${SJR_SEARCH_BASE_URL}?q=${encodeURIComponent(journalName)}&tip=jou`;
-    const searchOutcome = await fetchScimagoText(searchUrl);
-    if (!searchOutcome.ok) {
-        if (!searchOutcome.transient) {
+    try {
+        const dataset = await ensureSjrDataset();
+        const entry = findBestSjrMatch(normalizedQuery, dataset);
+        if (!entry) {
             sjrLookupCache.set(normalizedQuery, { kind: 'not_found' });
             return { status: 'not_found' };
         }
-        return { status: 'error', transient: true };
+
+        const data: SjrQuartileData = {
+            resolvedTitle: entry.resolvedTitle,
+            quartilesByYear: { ...entry.quartilesByYear }
+        };
+        sjrLookupCache.set(normalizedQuery, { kind: 'success', data });
+
+        const { quartile, year } = selectQuartileForYear(data, publicationYear ?? null);
+        return { status: 'success', quartile, year, resolvedTitle: data.resolvedTitle };
+    } catch (error) {
+        console.error('Error resolving SJR quartile from local dataset:', error);
+        return { status: 'error', transient: false };
     }
-    const searchText = searchOutcome.text;
-
-    const candidateIds = extractCandidateIdsFromSearch(searchText);
-    if (candidateIds.length === 0) {
-        sjrLookupCache.set(normalizedQuery, { kind: 'not_found' });
-        return { status: 'not_found' };
-    }
-
-    interface CandidateMatch {
-        score: number;
-        data: SjrQuartileData;
-    }
-
-    const candidateMatches: CandidateMatch[] = [];
-    const BATCH_SIZE = 4;
-    let encounteredTransientFailure = false;
-
-    for (let i = 0; i < candidateIds.length; i += BATCH_SIZE) {
-        const batch = candidateIds.slice(i, i + BATCH_SIZE);
-        const batchResults = await Promise.all(batch.map(async candidateId => {
-            const detailUrl = `${SJR_SEARCH_BASE_URL}?q=${candidateId}&tip=sid&clean=0`;
-            const detailOutcome = await fetchScimagoText(detailUrl);
-            if (!detailOutcome.ok) {
-                if (detailOutcome.transient) {
-                    encounteredTransientFailure = true;
-                }
-                return null;
-            }
-            const detailText = detailOutcome.text;
-            const resolvedTitle = extractSjrTitle(detailText);
-            if (!resolvedTitle) return null;
-            const normalizedResolved = normalizeJournalName(resolvedTitle);
-            if (!normalizedResolved) return null;
-            const quartilesByYear = parseSjrQuartilesFromText(detailText);
-            if (Object.keys(quartilesByYear).length === 0) return null;
-            const similarity = jaroWinkler(normalizedQuery, normalizedResolved);
-            return {
-                score: similarity,
-                data: { resolvedTitle, quartilesByYear }
-            } as CandidateMatch;
-        }));
-
-        for (const result of batchResults) {
-            if (result) {
-                candidateMatches.push(result);
-            }
-        }
-
-        if (candidateMatches.some(match => match.score >= 0.98)) {
-            break;
-        }
-    }
-
-    if (candidateMatches.length === 0) {
-        if (encounteredTransientFailure) {
-            return { status: 'error', transient: true };
-        }
-        sjrLookupCache.set(normalizedQuery, { kind: 'not_found' });
-        return { status: 'not_found' };
-    }
-
-    candidateMatches.sort((a, b) => b.score - a.score);
-    const bestData = candidateMatches[0].data;
-    sjrLookupCache.set(normalizedQuery, { kind: 'success', data: bestData });
-
-    const { quartile, year } = selectQuartileForYear(bestData, publicationYear ?? null);
-    return { status: 'success', quartile, year, resolvedTitle: bestData.resolvedTitle };
 }
 
 const COMMON_ABBREVIATIONS: Record<string, string> = { "int'l": "international", "intl": "international", "conf\\.": "conference", "conf": "conference", "proc\\.": "proceedings", "proc": "proceedings", "symp\\.": "symposium", "symp": "symposium", "j\\.": "journal", "jour": "journal", "trans\\.": "transactions", "trans": "transactions", "annu\\.": "annual", "comput\\.": "computing", "commun\\.": "communications", "syst\\.": "systems", "sci\\.": "science", "tech\\.": "technical", "technol": "technology", "engin\\.": "engineering", "res\\.": "research", "adv\\.": "advances", "appl\\.": "applications", "lectures notes": "lecture notes", "lect notes": "lecture notes", "lncs": "lecture notes in computer science", };
