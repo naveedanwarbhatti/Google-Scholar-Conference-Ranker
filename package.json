@@ -7,7 +7,7 @@
   "scripts": {
     "clean": "rimraf build",
     "build": "npm run clean && tsc -p tsconfig.build.json && npm run copy-assets",
-    "copy-assets": "cpx \"manifest.json\" build && cpx \"{core/**/*,icons/**/*,images/**/*}\" build",
+    "copy-assets": "cpx \"manifest.json\" build && cpx \"{core/**/*,icons/**/*,images/**/*,sjr/**/*}\" build",
     "zip": "cd build && zip -r ../ranker.zip .",
     "e2e": "npm run build && playwright test",
     "test": "echo \"run: npm run e2e\""
