@@ -2070,14 +2070,19 @@ async function fetchPublicationsFromDblp(
         const numericYear = year ? parseInt(year, 10) : null;
 
         const conferenceCandidates: string[] = [];
-        const confSeriesMatch = pubUrl.match(/^db\/conf\/([a-zA-Z][\w-]*)\//);
-        if (confSeriesMatch?.[1]) {
-          conferenceCandidates.push(confSeriesMatch[1]);
-        }
+        const addCandidate = (candidate: string | undefined | null) => {
+          if (!candidate) return;
+          const normalized = candidate.toLowerCase();
+          if (!conferenceCandidates.includes(normalized)) {
+            conferenceCandidates.push(normalized);
+          }
+        };
+
         const confFileMatch = pubUrl.match(/^db\/conf\/[^/]+\/([a-zA-Z][\w-]*?)(\d{4}.*)?\.html/);
-        if (confFileMatch?.[1] && !conferenceCandidates.includes(confFileMatch[1])) {
-          conferenceCandidates.push(confFileMatch[1]);
-        }
+        addCandidate(confFileMatch?.[1] ?? null);
+
+        const confSeriesMatch = pubUrl.match(/^db\/conf\/([a-zA-Z][\w-]*)\//);
+        addCandidate(confSeriesMatch?.[1] ?? null);
 
         for (const candidate of conferenceCandidates) {
           streamMeta = await resolveDblpStreamMetadata("conf", candidate, { year: numericYear });
