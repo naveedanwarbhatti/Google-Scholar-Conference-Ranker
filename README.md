@@ -1,7 +1,7 @@
 ![Version 1.7](https://img.shields.io/badge/version-1.7-blue.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-# Google Scholar Venue Ranker
+# Google Scholar Venue Ranker (GSVR)
 
 
 
