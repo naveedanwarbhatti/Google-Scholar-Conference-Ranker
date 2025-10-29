@@ -168,42 +168,86 @@ let scholarUrlToDblpInfoMap = new Map<string, { venue: string | null; pageCount:
 // --- END: DBLP Constants & Globals ---
 
 
+type DblpStreamType = "conf" | "journals";
+
+interface DblpStreamRef {
+  streamType: DblpStreamType;
+  streamId: string;
+  sinceYear: number | null;
+}
+
+interface DblpStreamMetadata {
+  streamType: DblpStreamType;
+  streamId: string;
+  acronym: string | null;
+  title: string | null;
+  discontinuedYear: number | null;
+  successorRefs: DblpStreamRef[];
+}
+
 /** --------  STREAM-XML memo cache  -------- */
 const streamMetaCache = new Map<
   string,                                              // cache key e.g. "conf:buildsys" or "journals:jpdc"
-  Promise<{ acronym: string|null; title: string|null } | null>
+  Promise<DblpStreamMetadata | null>
 >();
 
-/** --------  REPLACE the old fetchDblpStreamMetadata  -------- */
-async function fetchDblpStreamMetadata(
-  streamXmlUrl: string
-): Promise<{ acronym: string | null; title: string | null } | null> {
+function parseYearFromText(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const match = value.match(/\b(19|20)\d{2}\b/);
+  return match ? parseInt(match[0], 10) : null;
+}
 
-  // extract stream type & id from URLs like https://dblp.org/streams/conf/buildsys.xml
-  // or https://dblp.org/streams/journals/jpdc.xml
-  const match = streamXmlUrl.match(/\/streams\/(conf|journals)\/([^/]+)\.xml$/);
-  if (!match) return null;           // malformed url – fall back to previous behaviour
-
+function extractStreamRef(node: Element): DblpStreamRef | null {
+  const rawId = node.getAttribute("id")?.trim();
+  if (!rawId) return null;
+  const match = rawId.match(/^streams\/(conf|journals)\/([^/]+)$/);
+  if (!match) return null;
   const [, streamType, streamId] = match;
+  const sinceYear = parseYearFromText(node.getAttribute("label")?.trim());
+  return {
+    streamType: streamType as DblpStreamType,
+    streamId,
+    sinceYear,
+  };
+}
+
+async function fetchDblpStreamMetadata(
+  streamType: DblpStreamType,
+  streamId: string
+): Promise<DblpStreamMetadata | null> {
   const cacheKey = `${streamType}:${streamId}`;
 
   if (!streamMetaCache.has(cacheKey)) {
     streamMetaCache.set(cacheKey, (async () => {
+      const streamXmlUrl = `https://dblp.org/streams/${streamType}/${streamId}.xml`;
+
       try {
         const resp = await fetch(streamXmlUrl);
         if (resp.ok) {
-          const xml   = await resp.text();
-          const doc   = new DOMParser().parseFromString(xml, "application/xml");
+          const xml = await resp.text();
+          const doc = new DOMParser().parseFromString(xml, "application/xml");
           if (!doc.querySelector("parsererror")) {
             const nodeSelector = streamType === "conf" ? "dblpstreams > conf" : "dblpstreams > journal";
-            const node  = doc.querySelector(nodeSelector);
+            const node = doc.querySelector(nodeSelector);
             if (node) {
               const rawTitle = node.querySelector("title")?.textContent ?? "";
               const title = rawTitle ? rawTitle.replace(/\s+/g, " ").trim() : null;
               const acronymNodeName = streamType === "conf" ? "acronym" : "short";
               const acronym = node.querySelector(acronymNodeName)?.textContent?.trim() ?? null;
-              if (title || acronym) {
-                return { acronym, title };
+              const discontinuedYear = parseYearFromText(node.querySelector("disc")?.textContent?.trim());
+              const successorRefs = Array.from(node.querySelectorAll("successor"))
+                .map(extractStreamRef)
+                .filter((ref): ref is DblpStreamRef => Boolean(ref));
+
+              if (title || acronym || successorRefs.length || discontinuedYear !== null) {
+                return {
+                  streamType,
+                  streamId,
+                  acronym,
+                  title,
+                  discontinuedYear,
+                  successorRefs,
+                };
               }
             }
           }
@@ -226,10 +270,17 @@ async function fetchDblpStreamMetadata(
           const h1Title = indexDoc.querySelector("h1")?.textContent?.replace(/\s+/g, " ").trim();
           const title = titleAttr || h1Title || null;
           if (title) {
-            return { acronym: null, title };
+            return {
+              streamType,
+              streamId,
+              acronym: null,
+              title,
+              discontinuedYear: null,
+              successorRefs: [],
+            };
           }
         } catch {
-          return null;
+          // ignore and fall back to null
         }
       }
 
@@ -238,6 +289,52 @@ async function fetchDblpStreamMetadata(
   }
 
   return streamMetaCache.get(cacheKey)!;
+}
+
+async function resolveDblpStreamMetadata(
+  streamType: DblpStreamType,
+  streamId: string,
+  options: { year?: number | null } = {}
+): Promise<DblpStreamMetadata | null> {
+  const visited = new Set<string>();
+  let currentType: DblpStreamType = streamType;
+  let currentId = streamId;
+  let latestMeta: DblpStreamMetadata | null = null;
+  const targetYear = typeof options.year === "number" && !Number.isNaN(options.year) ? options.year : null;
+
+  while (true) {
+    const key = `${currentType}:${currentId}`;
+    if (visited.has(key)) break;
+    visited.add(key);
+
+    const meta = await fetchDblpStreamMetadata(currentType, currentId);
+    if (!meta) break;
+    latestMeta = meta;
+
+    if (currentType !== "conf" || targetYear === null) {
+      break;
+    }
+
+    const discYear = meta.discontinuedYear;
+    const successor = meta.successorRefs.find((ref) => {
+      const refKey = `${ref.streamType}:${ref.streamId}`;
+      if (visited.has(refKey)) return false;
+      if (ref.sinceYear != null && targetYear < ref.sinceYear) return false;
+      if (discYear != null) {
+        return targetYear > discYear;
+      }
+      return ref.sinceYear != null && targetYear >= ref.sinceYear;
+    });
+
+    if (!successor) {
+      break;
+    }
+
+    currentType = successor.streamType;
+    currentId = successor.streamId;
+  }
+
+  return latestMeta;
 }
 
 
@@ -1969,19 +2066,30 @@ async function fetchPublicationsFromDblp(
 
       const pubUrl = item.querySelector("url")?.textContent?.trim();
       if (pubUrl) {
-        let streamMeta: { acronym: string | null; title: string | null } | null = null;
+        let streamMeta: DblpStreamMetadata | null = null;
+        const numericYear = year ? parseInt(year, 10) : null;
 
-        const confMatch = pubUrl.match(/^db\/conf\/[^/]+\/([a-zA-Z][\w-]*?)(\d{4}.*)?\.html/);
-        if (confMatch?.[1]) {
-          const streamId     = confMatch[1];
-          const streamXmlUrl = `https://dblp.org/streams/conf/${streamId}.xml`;
-          streamMeta         = await fetchDblpStreamMetadata(streamXmlUrl);
-        } else {
+        const conferenceCandidates: string[] = [];
+        const confSeriesMatch = pubUrl.match(/^db\/conf\/([a-zA-Z][\w-]*)\//);
+        if (confSeriesMatch?.[1]) {
+          conferenceCandidates.push(confSeriesMatch[1]);
+        }
+        const confFileMatch = pubUrl.match(/^db\/conf\/[^/]+\/([a-zA-Z][\w-]*?)(\d{4}.*)?\.html/);
+        if (confFileMatch?.[1] && !conferenceCandidates.includes(confFileMatch[1])) {
+          conferenceCandidates.push(confFileMatch[1]);
+        }
+
+        for (const candidate of conferenceCandidates) {
+          streamMeta = await resolveDblpStreamMetadata("conf", candidate, { year: numericYear });
+          if (streamMeta && (streamMeta.acronym || streamMeta.title)) {
+            break;
+          }
+        }
+
+        if (!streamMeta) {
           const journalMatch = pubUrl.match(/^db\/journals\/([a-zA-Z][\w-]*)\//);
           if (journalMatch?.[1]) {
-            const journalId    = journalMatch[1];
-            const streamXmlUrl = `https://dblp.org/streams/journals/${journalId}.xml`;
-            streamMeta         = await fetchDblpStreamMetadata(streamXmlUrl);
+            streamMeta = await resolveDblpStreamMetadata("journals", journalMatch[1]);
           }
         }
 
