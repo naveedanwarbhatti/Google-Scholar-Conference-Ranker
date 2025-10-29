@@ -964,6 +964,32 @@ function stripOrgPrefixes(text: string): string {
     return currentText;
 }
 
+const CORE_TITLE_TRAILING_PATTERNS: RegExp[] = [
+    /\bpreviously\b.*$/,
+    /\bformerly\b.*$/,
+    /\bincluding\b.*$/,
+    /\bincorporating\b.*$/,
+    /\bfeaturing\b.*$/,
+    /\bco\s+located\b.*$/,
+    /\bco\s+hosted\b.*$/,
+];
+
+function generateCoreTitleVariants(coreTitle: string): string[] {
+    const normalized = coreTitle.replace(/\s+/g, ' ').trim();
+    if (!normalized) return [];
+
+    const variants = new Set<string>([normalized]);
+
+    for (const pattern of CORE_TITLE_TRAILING_PATTERNS) {
+        const trimmed = normalized.replace(pattern, '').trim();
+        if (trimmed && trimmed !== normalized) {
+            variants.add(trimmed);
+        }
+    }
+
+    return Array.from(variants);
+}
+
 
 function findRankForVenue(
     venueKey: string | null,
@@ -1058,13 +1084,16 @@ function findRankForVenue(
 
         for (const entry of coreData) {
             if (!entry.title) continue;
-            let coreTitle = cleanTextForComparison(entry.title, false);
-            coreTitle     = stripOrgPrefixes(coreTitle);
-            if (!coreTitle) continue;
+            const cleanedTitle = stripOrgPrefixes(cleanTextForComparison(entry.title, false));
+            const titleVariants = generateCoreTitleVariants(cleanedTitle);
+            if (titleVariants.length === 0) continue;
 
-            if (gsCleaned.includes(coreTitle) && coreTitle.length > longestLen) {
-                longestLen  = coreTitle.length;
-                bestSubRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+            for (const variant of titleVariants) {
+                if (!variant) continue;
+                if (gsCleaned.includes(variant) && variant.length > longestLen) {
+                    longestLen  = variant.length;
+                    bestSubRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+                }
             }
         }
 
@@ -1077,17 +1106,21 @@ function findRankForVenue(
 
         for (const entry of coreData) {
             if (!entry.title) continue;
-            let coreTitle = cleanTextForComparison(entry.title, false);
-            coreTitle     = stripOrgPrefixes(coreTitle);
-            if (!coreTitle) continue;
-            if (coreTitle.length < 6 || gsCleaned.length < 6) continue;
+            const cleanedTitle = stripOrgPrefixes(cleanTextForComparison(entry.title, false));
+            const titleVariants = generateCoreTitleVariants(cleanedTitle);
+            if (titleVariants.length === 0) continue;
 
-            const score = jaroWinkler(gsCleaned, coreTitle);
-            if (score >= FUZZY_THRESHOLD && score > bestFuzzy) {
-                bestFuzzy = score;
-                fuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
-                if (score === 1) break;
+            for (const variant of titleVariants) {
+                if (!variant || variant.length < 6 || gsCleaned.length < 6) continue;
+
+                const score = jaroWinkler(gsCleaned, variant);
+                if (score >= FUZZY_THRESHOLD && score > bestFuzzy) {
+                    bestFuzzy = score;
+                    fuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+                    if (score === 1) break;
+                }
             }
+            if (bestFuzzy === 1) break;
         }
 
         return fuzzyRank;
