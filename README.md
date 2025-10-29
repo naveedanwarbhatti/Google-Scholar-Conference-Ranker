@@ -30,7 +30,7 @@ Google Scholar is great at collecting publications but **terrible at showing th
 | Feature                   | Description |
 | ------------------------- | ----------- |
 | 🎯 **Historical Matching** | Selects the appropriate CORE ranking list (2023, 2021, 2020, 2018, 2017, 2014) based on the publication's year and applies multiple heuristics for matching. |
-| 🏷 **Rank badges**        | Shows colour‑coded A\*, A, B, C badges inline next to each conference paper title to reflect its historical rank. |
+| 🏷 **Rank badges**        | Shows color-coded A\*, A, B, C badges inline next to each conference paper title to reflect its historical rank. |
 | 📊 **Summary panel**      | Totals conference ranks (A\*, A, B, C, N/A) and SJR quartiles, aggregated across the processed publications. |
 | 📚 **Journal insights**   | Adds SJR quartile badges (Q1–Q4) next to journal papers using the latest SCImago data set. |
 | 🧹 **Name cleanup**       | Removes trailing titles like "PhD" or "Dr." before DBLP lookup for better matches. |
