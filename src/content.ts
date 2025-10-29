@@ -2303,45 +2303,9 @@ async function main() {
                     const coreDataFile = getCoreDataFileForYear(effectiveYear);
                     const yearSpecificCoreData = await loadCoreDataForFile(coreDataFile);
                     if (yearSpecificCoreData.length > 0) {
-                        const candidateVenueKeys: string[] = [];
-                        const seenVenueCandidates = new Set<string>();
-                        const addVenueCandidate = (value: string | null | undefined) => {
-                            if (!value) return;
-                            const trimmed = value.trim();
-                            if (!trimmed) return;
-                            const normalized = trimmed.toLowerCase();
-                            if (seenVenueCandidates.has(normalized)) return;
-                            seenVenueCandidates.add(normalized);
-                            candidateVenueKeys.push(trimmed);
-                        };
-
-                        addVenueCandidate(dblpInfo.acronym);
-                        addVenueCandidate(venueName);
-                        addVenueCandidate(dblpInfo.venue_full);
-
-                        if (venueName) {
-                            for (const extracted of extractPotentialAcronymsFromText(venueName)) {
-                                addVenueCandidate(extracted.toUpperCase());
-                            }
-                        }
-                        if (dblpInfo.venue_full) {
-                            for (const extracted of extractPotentialAcronymsFromText(dblpInfo.venue_full)) {
-                                addVenueCandidate(extracted.toUpperCase());
-                            }
-                        }
-
-                        const fullVenueTitleForRanking = dblpInfo.venue_full ?? venueName ?? null;
-                        if (fullVenueTitleForRanking) {
-                            addVenueCandidate(fullVenueTitleForRanking);
-                        }
-
-                        for (const candidateKey of candidateVenueKeys) {
-                            const attemptedRank = findRankForVenue(candidateKey, yearSpecificCoreData, fullVenueTitleForRanking);
-                            if (VALID_RANKS.includes(attemptedRank)) {
-                                currentRank = attemptedRank;
-                                break;
-                            }
-                        }
+                        let venueForRankingApi: string | null = dblpInfo.acronym || venueName;
+                        const fullVenueTitleForRanking = dblpInfo.venue_full ?? null;
+                        currentRank = findRankForVenue(venueForRankingApi, yearSpecificCoreData, fullVenueTitleForRanking);
                     }
                 }
             }
