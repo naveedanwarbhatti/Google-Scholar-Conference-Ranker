@@ -255,7 +255,7 @@
   {
     "46": 4612,
     "2172": 52,
-    "International Conference on Advanced Communications and Computation": "ACM International Conference on the Foundations of Software Engineering (was ESEC/FSE, changed 2024; duplicate previously listed as ESEC, removed from DB)",
+    "International Conference on Advanced Communications and Computation": "ACM International Conference on the Foundations of Software Engineering",
     "INFOCOMP": "FSE",
     "CORE2023": "CORE2023",
     "Unranked": "A*",
@@ -464,7 +464,7 @@
   {
     "46": 4604,
     "2172": 1775,
-    "International Conference on Advanced Communications and Computation": "ACM Symposium on Access Control Models and Technologies (previously ACM Workshop on Role-Based Access Control, RBAC, changed in 2000)",
+    "International Conference on Advanced Communications and Computation": "ACM Symposium on Access Control Models and Technologies",
     "INFOCOMP": "SACMAT",
     "CORE2023": "CORE2023",
     "Unranked": "C",
@@ -1630,7 +1630,7 @@
   {
     "46": 4613,
     "2172": 1245,
-    "International Conference on Advanced Communications and Computation": "Conference on Interactive Theorem Proving (previously TPHOLs, changed in 2009)",
+    "International Conference on Advanced Communications and Computation": "Conference on Interactive Theorem Proving",
     "INFOCOMP": "ITP",
     "CORE2023": "CORE2023",
     "Unranked": "A",
@@ -1674,7 +1674,7 @@
   {
     "46": 4608,
     "2172": 380,
-    "International Conference on Advanced Communications and Computation": "Conference on Software Engineering Education and Training (previously Conference is Software Engineering Education, CSEE, changed in 1997)",
+    "International Conference on Advanced Communications and Computation": "Conference on Software Engineering Education and Training",
     "INFOCOMP": "CSEET",
     "CORE2023": "CORE2023",
     "Unranked": "C",
@@ -3335,7 +3335,7 @@
   {
     "46": 4612,
     "2172": 1181,
-    "International Conference on Advanced Communications and Computation": "IEEE International Conference on Program Comprehension (previously IWPC, changed in 2006)",
+    "International Conference on Advanced Communications and Computation": "IEEE International Conference on Program Comprehension",
     "INFOCOMP": "ICPC",
     "CORE2023": "CORE2023",
     "Unranked": "A",
@@ -3390,7 +3390,7 @@
   {
     "46": 4612,
     "2172": 676,
-    "International Conference on Advanced Communications and Computation": "IEEE International Conference on Software Maintenance and Evolution (prior to 2014 was ICSM, IEEE International Conference on Software Maintenance)",
+    "International Conference on Advanced Communications and Computation": "IEEE International Conference on Software Maintenance and Evolution",
     "INFOCOMP": "ICSME",
     "CORE2023": "CORE2023",
     "Unranked": "A",
@@ -3401,7 +3401,7 @@
   {
     "46": 4606,
     "2172": 674,
-    "International Conference on Advanced Communications and Computation": "IEEE International Conference on Software Services Engineering (previously IEEE International Conference on Services Computing SCC)",
+    "International Conference on Advanced Communications and Computation": "IEEE International Conference on Software Services Engineering",
     "INFOCOMP": "IEEE SSE",
     "CORE2023": "CORE2023",
     "Unranked": "B",
@@ -4138,7 +4138,7 @@
   {
     "46": 4602,
     "2172": 794,
-    "International Conference on Advanced Communications and Computation": "IEEE/WIC/ACM International Conference on Web Intelligence (previously joint with Intelligent Agent Technology WI-IAT)",
+    "International Conference on Advanced Communications and Computation": "IEEE/WIC/ACM International Conference on Web Intelligence",
     "INFOCOMP": "WI",
     "CORE2023": "CORE2023",
     "Unranked": "B",
@@ -4699,7 +4699,7 @@
   {
     "46": 4612,
     "2172": 882,
-    "International Conference on Advanced Communications and Computation": "International Conference Abstract State Machines, Alloy, B, TLA, VDM, and Z (Previously International Conference of B and Z Users, ZB, changed in 2008)",
+    "International Conference on Advanced Communications and Computation": "International Conference Abstract State Machines, Alloy, B, TLA, VDM, and Z",
     "INFOCOMP": "ABZ",
     "CORE2023": "CORE2023",
     "Unranked": "C",
@@ -5876,7 +5876,7 @@
   {
     "46": "CSE",
     "2172": 1422,
-    "International Conference on Advanced Communications and Computation": "International Conference on Hardware/Software Codesign and System Synthesis (previously ISSN, changed in 2003)",
+    "International Conference on Advanced Communications and Computation": "International Conference on Hardware/Software Codesign and System Synthesis",
     "INFOCOMP": "CODES+ISSS",
     "CORE2023": "CORE2023",
     "Unranked": "C",
@@ -6514,7 +6514,7 @@
   {
     "46": 4612,
     "2172": 1692,
-    "International Conference on Advanced Communications and Computation": "International Conference on Managed Programming Languages and Runtimes (was ManLang and previously Principles and Practice of Programming in Java: PPPJ)",
+    "International Conference on Advanced Communications and Computation": "International Conference on Managed Programming Languages and Runtimes",
     "INFOCOMP": "MPLR",
     "CORE2023": "CORE2023",
     "Unranked": "C",
@@ -6624,7 +6624,7 @@
   {
     "46": 4612,
     "2172": 1244,
-    "International Conference on Advanced Communications and Computation": "International Conference on Model Driven Engineering Languages and Systems (Previously UML, changed in 2005)",
+    "International Conference on Advanced Communications and Computation": "International Conference on Model Driven Engineering Languages and Systems",
     "INFOCOMP": "MODELS",
     "CORE2023": "CORE2023",
     "Unranked": "A",
@@ -6679,7 +6679,7 @@
   {
     "46": 4603,
     "2172": 44,
-    "International Conference on Advanced Communications and Computation": "International Conference on Multimedia Retrieval (previously MIR)",
+    "International Conference on Advanced Communications and Computation": "International Conference on Multimedia Retrieval",
     "INFOCOMP": "ICMR",
     "CORE2023": "CORE2023",
     "Unranked": "B",
@@ -7196,7 +7196,7 @@
   {
     "46": 4612,
     "2172": 791,
-    "International Conference on Advanced Communications and Computation": "International Conference on Software Architecture (was previously WICSA)",
+    "International Conference on Advanced Communications and Computation": "International Conference on Software Architecture",
     "INFOCOMP": "ICSA",
     "CORE2023": "CORE2023",
     "Unranked": "A",
