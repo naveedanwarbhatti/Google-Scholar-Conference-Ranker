@@ -2449,9 +2449,36 @@ async function main() {
                     const coreDataFile = getCoreDataFileForYear(effectiveYear);
                     const yearSpecificCoreData = await loadCoreDataForFile(coreDataFile);
                     if (yearSpecificCoreData.length > 0) {
-                        let venueForRankingApi: string | null = dblpInfo.acronym || venueName;
                         const fullVenueTitleForRanking = dblpInfo.venue_full ?? null;
-                        currentRank = findRankForVenue(venueForRankingApi, yearSpecificCoreData, fullVenueTitleForRanking);
+                        const rankingCandidates: string[] = [];
+
+                        const pushCandidate = (candidate: string | null | undefined) => {
+                            if (!candidate) return;
+                            const trimmed = candidate.trim();
+                            if (!trimmed) return;
+                            const lower = trimmed.toLowerCase();
+                            if (!rankingCandidates.some(existing => existing.toLowerCase() === lower)) {
+                                rankingCandidates.push(trimmed);
+                            }
+                        };
+
+                        pushCandidate(dblpInfo.acronym);
+                        pushCandidate(venueName);
+                        pushCandidate(fullVenueTitleForRanking);
+
+                        let resolvedRank: string | null = null;
+                        for (const candidate of rankingCandidates) {
+                            const attempt = findRankForVenue(candidate, yearSpecificCoreData, fullVenueTitleForRanking);
+                            if (VALID_RANKS.includes(attempt)) {
+                                resolvedRank = attempt;
+                                break;
+                            }
+                            if (resolvedRank === null && attempt !== "N/A") {
+                                resolvedRank = attempt;
+                            }
+                        }
+
+                        currentRank = resolvedRank ?? "N/A";
                     }
                 }
             }

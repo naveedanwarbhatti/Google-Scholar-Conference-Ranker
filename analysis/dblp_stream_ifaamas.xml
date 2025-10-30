@@ -1,0 +1,10 @@
+<dblpstreams>
+  <conf mdate="2024-11-05" key="streams/conf/ifaamas">
+    <indexpage>db/conf/ifaamas/index.html</indexpage>
+    <acronym>AAMAS</acronym>
+    <title>International Conference on <k/>Autonomous Agents and Multiagent Systems</title>
+    <formername acronym="AAMAS">International Joint Conference on <k/>Autonomous Agents &amp; Multiagent Systems</formername>
+    <url>https://www.ifaamas.org/previousaamas.html</url>
+    <url>https://dl.acm.org/conference/aamas</url>
+  </conf>
+</dblpstreams>
