@@ -859,6 +859,28 @@ function stripOrgPrefixes(text) {
     } while (strippedSomething && currentText.length > 0);
     return currentText;
 }
+const CORE_TITLE_TRAILING_PATTERNS = [
+    /\bpreviously\b.*$/,
+    /\bformerly\b.*$/,
+    /\bincluding\b.*$/,
+    /\bincorporating\b.*$/,
+    /\bfeaturing\b.*$/,
+    /\bco\s+located\b.*$/,
+    /\bco\s+hosted\b.*$/,
+];
+function generateCoreTitleVariants(coreTitle) {
+    const normalized = coreTitle.replace(/\s+/g, ' ').trim();
+    if (!normalized)
+        return [];
+    const variants = new Set([normalized]);
+    for (const pattern of CORE_TITLE_TRAILING_PATTERNS) {
+        const trimmed = normalized.replace(pattern, '').trim();
+        if (trimmed && trimmed !== normalized) {
+            variants.add(trimmed);
+        }
+    }
+    return Array.from(variants);
+}
 function findRankForVenue(venueKey, coreData, fullVenueTitle = undefined) {
     const trimmedVenueKey = venueKey?.trim();
     const keyLower = trimmedVenueKey ? trimmedVenueKey.toLowerCase() : "";
@@ -919,13 +941,17 @@ function findRankForVenue(venueKey, coreData, fullVenueTitle = undefined) {
         for (const entry of coreData) {
             if (!entry.title)
                 continue;
-            let coreTitle = cleanTextForComparison(entry.title, false);
-            coreTitle = stripOrgPrefixes(coreTitle);
-            if (!coreTitle)
+            const cleanedTitle = stripOrgPrefixes(cleanTextForComparison(entry.title, false));
+            const titleVariants = generateCoreTitleVariants(cleanedTitle);
+            if (titleVariants.length === 0)
                 continue;
-            if (gsCleaned.includes(coreTitle) && coreTitle.length > longestLen) {
-                longestLen = coreTitle.length;
-                bestSubRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+            for (const variant of titleVariants) {
+                if (!variant)
+                    continue;
+                if (gsCleaned.includes(variant) && variant.length > longestLen) {
+                    longestLen = variant.length;
+                    bestSubRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+                }
             }
         }
         return bestSubRank;
@@ -936,19 +962,23 @@ function findRankForVenue(venueKey, coreData, fullVenueTitle = undefined) {
         for (const entry of coreData) {
             if (!entry.title)
                 continue;
-            let coreTitle = cleanTextForComparison(entry.title, false);
-            coreTitle = stripOrgPrefixes(coreTitle);
-            if (!coreTitle)
+            const cleanedTitle = stripOrgPrefixes(cleanTextForComparison(entry.title, false));
+            const titleVariants = generateCoreTitleVariants(cleanedTitle);
+            if (titleVariants.length === 0)
                 continue;
-            if (coreTitle.length < 6 || gsCleaned.length < 6)
-                continue;
-            const score = jaroWinkler(gsCleaned, coreTitle);
-            if (score >= FUZZY_THRESHOLD && score > bestFuzzy) {
-                bestFuzzy = score;
-                fuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
-                if (score === 1)
-                    break;
+            for (const variant of titleVariants) {
+                if (!variant || variant.length < 6 || gsCleaned.length < 6)
+                    continue;
+                const score = jaroWinkler(gsCleaned, variant);
+                if (score >= FUZZY_THRESHOLD && score > bestFuzzy) {
+                    bestFuzzy = score;
+                    fuzzyRank = VALID_RANKS.includes(entry.rank) ? entry.rank : null;
+                    if (score === 1)
+                        break;
+                }
             }
+            if (bestFuzzy === 1)
+                break;
         }
         return fuzzyRank;
     };
@@ -1908,14 +1938,18 @@ async function fetchPublicationsFromDblp(authorPidPath, statusElement) {
                 let streamMeta = null;
                 const numericYear = year ? parseInt(year, 10) : null;
                 const conferenceCandidates = [];
-                const confSeriesMatch = pubUrl.match(/^db\/conf\/([a-zA-Z][\w-]*)\//);
-                if (confSeriesMatch?.[1]) {
-                    conferenceCandidates.push(confSeriesMatch[1]);
-                }
+                const addCandidate = (candidate) => {
+                    if (!candidate)
+                        return;
+                    const normalized = candidate.toLowerCase();
+                    if (!conferenceCandidates.includes(normalized)) {
+                        conferenceCandidates.push(normalized);
+                    }
+                };
                 const confFileMatch = pubUrl.match(/^db\/conf\/[^/]+\/([a-zA-Z][\w-]*?)(\d{4}.*)?\.html/);
-                if (confFileMatch?.[1] && !conferenceCandidates.includes(confFileMatch[1])) {
-                    conferenceCandidates.push(confFileMatch[1]);
-                }
+                addCandidate(confFileMatch?.[1] ?? null);
+                const confSeriesMatch = pubUrl.match(/^db\/conf\/([a-zA-Z][\w-]*)\//);
+                addCandidate(confSeriesMatch?.[1] ?? null);
                 for (const candidate of conferenceCandidates) {
                     streamMeta = await resolveDblpStreamMetadata("conf", candidate, { year: numericYear });
                     if (streamMeta && (streamMeta.acronym || streamMeta.title)) {
